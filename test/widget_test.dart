@@ -1,30 +1,33 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:tool_resc/main.dart';
+import 'package:tool_resc/features/components/components_db.dart';
+import 'package:tool_resc/features/components/label_parser.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  group('ScannedLabel', () {
+    test('parses LCSC QR', () {
+      final label = ScannedLabel.parse(
+        '{pbn:PICK2609230751,on:WM2609230751,pc:C141700,pm:RC0805FR-07820KL,qty:100,mc:,cc:1,pdi:123,hp:null}',
+      );
+      expect(label.mpn, 'RC0805FR-07820KL');
+      expect(label.supplierPart, 'C141700');
+      expect(label.quantity, '100');
+      expect(label.orderNumber, 'WM2609230751');
+    });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    test('parses ECIA DataMatrix', () {
+      final label = ScannedLabel.parse('[)>\u001e06\u001dP296-1234-ND\u001d1PRC0805FR-07820KL\u001dQ100\u001e\u0004');
+      expect(label.mpn, 'RC0805FR-07820KL');
+      expect(label.supplierPart, '296-1234-ND');
+      expect(label.quantity, '100');
+    });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    test('parses 1P barcode and plain text', () {
+      expect(ScannedLabel.parse('1PRC0805FR-07820KL').mpn, 'RC0805FR-07820KL');
+      expect(ScannedLabel.parse(' RC0805FR-07820KL ').mpn, 'RC0805FR-07820KL');
+    });
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('mpnKey ignores case, spaces and dashes', () {
+    expect(mpnKey('rc0805fr 07820kl'), mpnKey('RC0805FR-07820KL'));
   });
 }
