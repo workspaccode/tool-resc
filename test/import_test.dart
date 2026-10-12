@@ -45,8 +45,8 @@ void main() {
     expect(hit.items.single.values['LCSC Part Number'], 'C141700');
     expect(hit.items.single.values['Quantity'], '100');
 
-    // Scans match tolerantly: OCR read "O" for "0".
-    expect(repo.matchKey('RCO805FR-0782OKL'), 'RC0805FR07820KL');
+    // Scans match by normalized MPN.
+    expect(repo.matchKey('rc0805fr 07820kl'), 'RC0805FR07820KL');
     expect(repo.matchKey('RC0805FR-07820KL'), 'RC0805FR07820KL');
     expect(repo.matchKey('NOT-A-PART-99'), isNull);
     expect((await repo.rowsFor('RC0805FR07820KL')).single.mpn, 'RC0805FR-07820KL');

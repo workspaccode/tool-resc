@@ -35,30 +35,3 @@ class AppearanceNotifier extends Notifier<Appearance> {
 }
 
 final appearanceProvider = NotifierProvider<AppearanceNotifier, Appearance>(AppearanceNotifier.new);
-
-/// How the scanner reads a label.
-enum ScanMethod {
-  text('MPN Text', 'Reads the “MPN:” line printed on the label.'),
-  code('QR Code', 'Reads the QR code or DataMatrix on the label.');
-
-  const ScanMethod(this.label, this.description);
-
-  final String label;
-  final String description;
-}
-
-class ScanMethodNotifier extends Notifier<ScanMethod> {
-  static const _key = 'scanMethod';
-
-  Box<Object> get _box => Hive.box<Object>(Boxes.settings);
-
-  @override
-  ScanMethod build() => ScanMethod.values.asNameMap()[_box.get(_key)] ?? ScanMethod.text;
-
-  void set(ScanMethod value) {
-    _box.put(_key, value.name);
-    state = value;
-  }
-}
-
-final scanMethodProvider = NotifierProvider<ScanMethodNotifier, ScanMethod>(ScanMethodNotifier.new);

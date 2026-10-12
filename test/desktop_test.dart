@@ -64,8 +64,14 @@ void main() {
       PhysicalKeyboardKey.keyD,
       PhysicalKeyboardKey.keyR,
     ]) {
-      await simulateKeyDownEvent(LogicalKeyboardKey.findKeyByKeyId(key.usbHidUsage) ?? LogicalKeyboardKey.keyA, physicalKey: key);
-      await simulateKeyUpEvent(LogicalKeyboardKey.findKeyByKeyId(key.usbHidUsage) ?? LogicalKeyboardKey.keyA, physicalKey: key);
+      await simulateKeyDownEvent(
+        LogicalKeyboardKey.findKeyByKeyId(key.usbHidUsage) ?? LogicalKeyboardKey.keyA,
+        physicalKey: key,
+      );
+      await simulateKeyUpEvent(
+        LogicalKeyboardKey.findKeyByKeyId(key.usbHidUsage) ?? LogicalKeyboardKey.keyA,
+        physicalKey: key,
+      );
     }
     await simulateKeyDownEvent(LogicalKeyboardKey.enter);
     await simulateKeyUpEvent(LogicalKeyboardKey.enter);

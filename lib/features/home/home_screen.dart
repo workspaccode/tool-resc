@@ -67,7 +67,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             _Sidebar(current: _current, onSelect: (i) => setState(() => _current = i)),
             Container(width: 0.5, color: context.resolve(CupertinoColors.separator)),
-            Expanded(child: KeyedSubtree(key: ValueKey(_current), child: tools[_current].builder(context))),
+            Expanded(
+              child: KeyedSubtree(key: ValueKey(_current), child: tools[_current].builder(context)),
+            ),
           ],
         );
       },
@@ -121,7 +123,10 @@ class _Sidebar extends ConsumerWidget {
   final int current;
   final ValueChanged<int> onSelect;
 
-  static const _background = CupertinoDynamicColor.withBrightness(color: Color(0xFFEBEBF0), darkColor: Color(0xFF1E1E20));
+  static const _background = CupertinoDynamicColor.withBrightness(
+    color: Color(0xFFEBEBF0),
+    darkColor: Color(0xFF1E1E20),
+  );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -146,7 +151,10 @@ class _Sidebar extends ConsumerWidget {
           const SizedBox(height: 24),
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-            child: Text('Tools', style: AppText.caption.copyWith(color: secondary, fontWeight: FontWeight.w600)),
+            child: Text(
+              'Tools',
+              style: AppText.caption.copyWith(color: secondary, fontWeight: FontWeight.w600),
+            ),
           ),
           for (var i = 0; i < tools.length; i++)
             _SidebarItem(

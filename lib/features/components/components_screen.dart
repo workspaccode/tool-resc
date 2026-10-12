@@ -76,8 +76,8 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
     _handleLabel(ScannedLabel.parse(text));
   }
 
-  /// Shows a scanned label: matches it (tolerating OCR misreads), fills the
-  /// search with the stored MPN, and opens it when it has a single row.
+  /// Shows a scanned label: fills the search with the MPN as stored, and
+  /// opens it when it has a single row.
   Future<void> _handleLabel(ScannedLabel label) async {
     final repo = ref.read(componentsRepositoryProvider);
     final key = repo.matchKey(label.mpn);
@@ -570,8 +570,6 @@ class _ScanResultCard extends StatelessWidget {
     final color = found ? CupertinoColors.systemGreen : CupertinoColors.systemRed;
     final secondary = context.resolve(CupertinoColors.secondaryLabel);
     final details = [
-      ('Read from', label.source == LabelSource.text ? 'MPN text' : 'QR / barcode'),
-      if (found && mpnKey(label.mpn) != mpnKey(mpn)) ('Read as', label.mpn),
       if (label.supplierPart != null) ('Supplier', label.supplierPart!),
       if (label.quantity != null) ('Qty', label.quantity!),
       if (label.orderNumber != null) ('Order', label.orderNumber!),
@@ -669,7 +667,7 @@ class _Hint extends StatelessWidget {
           Text(
             isDesktop
                 ? 'Type an MPN, or scan the label on a reel or bag with your USB scanner.'
-                : 'Search by MPN, or scan the label on a reel or bag by its “MPN:” line or QR code.',
+                : 'Search by MPN, or scan the QR code on a reel or bag label.',
             textAlign: TextAlign.center,
             style: AppText.subheadline.copyWith(color: secondary),
           ),

@@ -50,13 +50,6 @@ String mpnKey(String mpn) {
   return key.length > 240 ? key.substring(0, 240) : key; // room for the row suffix
 }
 
-/// Folds characters that OCR commonly confuses (O/0, I/1, S/5...) so a
-/// misread MPN still matches. Both sides are folded before comparing.
-String ocrFold(String key) {
-  const map = {'O': '0', 'Q': '0', 'D': '0', 'I': '1', 'L': '1', 'S': '5', 'Z': '2', 'B': '8', 'G': '6'};
-  return key.split('').map((c) => map[c] ?? c).join();
-}
-
 /// Components stored in Hive. Each Excel header becomes a field and each
 /// Excel row is one record (a map of field label -> value). Rows are keyed
 /// `<mpnKey>~<n>`, so several rows may share an MPN and searching only
@@ -87,10 +80,9 @@ class ComponentsRepository {
     return i < 0 ? rowKey : rowKey.substring(0, i);
   }
 
-  /// MPN key -> its row keys, and folded MPN key -> MPN keys. Built on first
-  /// use and dropped whenever the data changes.
+  /// MPN key -> its row keys. Built on first use and dropped whenever the
+  /// data changes.
   Map<String, List<String>>? _byMpn;
-  Map<String, List<String>>? _byFolded;
 
   Map<String, List<String>> get _index {
     if (_byMpn case final index?) return index;
@@ -101,27 +93,12 @@ class ComponentsRepository {
     return _byMpn = index;
   }
 
-  void _invalidate() {
-    _byMpn = null;
-    _byFolded = null;
-  }
+  void _invalidate() => _byMpn = null;
 
-  /// The stored MPN key for a scanned MPN, tolerating OCR confusions.
-  /// Null if there is no match, or more than one part after folding.
+  /// The stored MPN key for a scanned MPN, or null if it isn't in the database.
   String? matchKey(String mpn) {
     final key = mpnKey(mpn);
-    if (key.isEmpty) return null;
-    if (_index.containsKey(key)) return key;
-    final hits = (_byFolded ??= _buildFolded())[ocrFold(key)];
-    return hits != null && hits.length == 1 ? hits.single : null;
-  }
-
-  Map<String, List<String>> _buildFolded() {
-    final folded = <String, List<String>>{};
-    for (final k in _index.keys) {
-      (folded[ocrFold(k)] ??= []).add(k);
-    }
-    return folded;
+    return key.isNotEmpty && _index.containsKey(key) ? key : null;
   }
 
   /// All rows of an MPN key, in import order.

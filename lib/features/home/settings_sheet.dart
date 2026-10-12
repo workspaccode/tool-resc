@@ -21,7 +21,6 @@ class _SettingsSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final appearance = ref.watch(appearanceProvider);
-    final scanMethod = ref.watch(scanMethodProvider);
     final blue = context.resolve(CupertinoColors.systemBlue);
 
     return CupertinoPageScaffold(
@@ -79,23 +78,15 @@ class _SettingsSheet extends ConsumerWidget {
               ],
             )
           else
-            Section(
-              header: 'Scanning',
-              footer: '${scanMethod.description} You can also switch in the camera.',
+            const Section(
+              header: 'Scanner',
+              footer: 'Tap Scan Label in Components and point the camera at the QR code on the label.',
               children: [
-                for (final option in ScanMethod.values)
-                  CupertinoListTile(
-                    leading: IconTile(
-                      icon: option == ScanMethod.text ? CupertinoIcons.textformat : CupertinoIcons.qrcode,
-                      color: option == ScanMethod.text ? CupertinoColors.systemTeal : CupertinoColors.systemPurple,
-                    ),
-                    title: Text(option.label),
-                    trailing: option == scanMethod ? Icon(CupertinoIcons.checkmark_alt, color: blue) : null,
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      ref.read(scanMethodProvider.notifier).set(option);
-                    },
-                  ),
+                CupertinoListTile(
+                  leading: IconTile(icon: CupertinoIcons.qrcode, color: CupertinoColors.systemPurple),
+                  title: Text('Camera'),
+                  additionalInfo: Text('QR code'),
+                ),
               ],
             ),
           Section(

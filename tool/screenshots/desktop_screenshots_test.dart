@@ -104,7 +104,8 @@ Future<void> _typeLikeScanner(String text) async {
     final upper = ch.toUpperCase() == ch && ch.toLowerCase() != ch;
     final base = shifted[ch] ?? ch.toLowerCase();
     final shift = upper || shifted.containsKey(ch);
-    final key = physical[base] ??
+    final key =
+        physical[base] ??
         (RegExp('[a-z]').hasMatch(base)
             ? PhysicalKeyboardKey(0x00070004 + base.codeUnitAt(0) - 0x61)
             : PhysicalKeyboardKey(base == '0' ? 0x00070027 : 0x0007001E + base.codeUnitAt(0) - 0x31));
