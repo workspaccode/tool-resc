@@ -1,17 +1,22 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/platform.dart';
 import '../../app/theme.dart';
 import '../../widgets/section.dart';
 import '../../widgets/hud.dart';
+import '../../widgets/clickable_tile.dart';
 import '../../widgets/icon_tile.dart';
 import 'components_repository.dart';
 
 class ComponentDetailScreen extends StatelessWidget {
-  const ComponentDetailScreen({super.key, required this.component, this.mpnField});
+  const ComponentDetailScreen({super.key, required this.component, this.mpnField, this.embedded = false});
 
   final Component component;
   final String? mpnField;
+
+  /// Shown as the detail pane of a split layout rather than a pushed page.
+  final bool embedded;
 
   void _copy(BuildContext context, String value) {
     Clipboard.setData(ClipboardData(text: value));
@@ -29,7 +34,10 @@ class ComponentDetailScreen extends StatelessWidget {
         slivers: [
           CupertinoSliverNavigationBar(
             largeTitle: const Text('Component'),
-            previousPageTitle: 'Components',
+            previousPageTitle: embedded ? null : 'Components',
+            automaticallyImplyLeading: !embedded,
+            // A second large-title bar in the same route must not animate.
+            transitionBetweenRoutes: !embedded,
             trailing: CupertinoButton(
               padding: EdgeInsets.zero,
               onPressed: () => _copy(context, component.mpn),
@@ -72,10 +80,10 @@ class ComponentDetailScreen extends StatelessWidget {
             SliverToBoxAdapter(
               child: Section(
                 header: '${fields.length} fields',
-                footer: 'Tap a field to copy its value.',
+                footer: isDesktop ? 'Click a field to copy its value.' : 'Tap a field to copy its value.',
                 children: [
                   for (final f in fields)
-                    CupertinoListTile(
+                    ClickableTile(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                       title: Text(f.key, style: AppText.footnote.copyWith(color: secondary)),
                       subtitle: Text(

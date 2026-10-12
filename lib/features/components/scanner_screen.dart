@@ -291,13 +291,17 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> with WidgetsBindi
                 top: frame.bottom + 28,
                 left: 24,
                 right: 24,
-                child: Center(child: _StatusPill(method: method, candidate: _candidateMpn)),
+                child: Center(
+                  child: _StatusPill(method: method, candidate: _candidateMpn),
+                ),
               ),
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: padding.bottom + 24,
-                child: Center(child: _MethodSwitch(method: method, onChanged: _setMethod)),
+                child: Center(
+                  child: _MethodSwitch(method: method, onChanged: _setMethod),
+                ),
               ),
             ],
           );
@@ -361,8 +365,14 @@ class _StatusPill extends StatelessWidget {
                   child: Text.rich(
                     TextSpan(
                       children: [
-                        TextSpan(text: 'MPN  ', style: style.copyWith(color: CupertinoColors.systemGrey2)),
-                        TextSpan(text: candidate, style: style.copyWith(fontWeight: FontWeight.w600)),
+                        TextSpan(
+                          text: 'MPN  ',
+                          style: style.copyWith(color: CupertinoColors.systemGrey2),
+                        ),
+                        TextSpan(
+                          text: candidate,
+                          style: style.copyWith(fontWeight: FontWeight.w600),
+                        ),
                       ],
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -390,7 +400,10 @@ class _MethodSwitch extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: CupertinoColors.white),
           const SizedBox(width: 6),
-          Text(label, style: AppText.subheadline.copyWith(color: CupertinoColors.white, fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: AppText.subheadline.copyWith(color: CupertinoColors.white, fontWeight: FontWeight.w600),
+          ),
         ],
       ),
     );

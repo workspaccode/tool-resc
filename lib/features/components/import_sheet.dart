@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme.dart';
 import '../../widgets/section.dart';
+import '../../widgets/adaptive_sheet.dart';
 import '../../widgets/icon_tile.dart';
 import 'components_providers.dart';
 import 'components_repository.dart';
@@ -15,10 +16,9 @@ Future<ImportResult?> showImportSheet(
   required String fileName,
   required List<ExcelTable> tables,
 }) {
-  return showCupertinoSheet<ImportResult>(
-    context: context,
-    scrollableBuilder: (context, controller) =>
-        _ImportSheet(fileName: fileName, tables: tables, scrollController: controller),
+  return showAdaptiveSheet<ImportResult>(
+    context,
+    builder: (context, controller) => _ImportSheet(fileName: fileName, tables: tables, scrollController: controller),
   );
 }
 

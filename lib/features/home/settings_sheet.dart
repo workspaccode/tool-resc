@@ -2,16 +2,15 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/platform.dart';
 import '../../app/settings.dart';
 import '../../app/theme.dart';
 import '../../widgets/section.dart';
+import '../../widgets/adaptive_sheet.dart';
 import '../../widgets/icon_tile.dart';
 
 void showSettingsSheet(BuildContext context) {
-  showCupertinoSheet<void>(
-    context: context,
-    scrollableBuilder: (context, controller) => _SettingsSheet(scrollController: controller),
-  );
+  showAdaptiveSheet<void>(context, builder: (context, controller) => _SettingsSheet(scrollController: controller));
 }
 
 class _SettingsSheet extends ConsumerWidget {
@@ -64,25 +63,41 @@ class _SettingsSheet extends ConsumerWidget {
                 ),
             ],
           ),
-          Section(
-            header: 'Scanning',
-            footer: '${scanMethod.description} You can also switch in the camera.',
-            children: [
-              for (final option in ScanMethod.values)
+          if (isDesktop)
+            const Section(
+              header: 'Scanner',
+              footer:
+                  'Connect a USB or Bluetooth barcode scanner in keyboard (HID) mode, set to send Enter after '
+                  'each scan. In Components, scan anywhere. You don’t need to click the search field first, '
+                  'and scans read correctly with any keyboard layout, including Arabic.',
+              children: [
                 CupertinoListTile(
-                  leading: IconTile(
-                    icon: option == ScanMethod.text ? CupertinoIcons.textformat : CupertinoIcons.qrcode,
-                    color: option == ScanMethod.text ? CupertinoColors.systemTeal : CupertinoColors.systemPurple,
-                  ),
-                  title: Text(option.label),
-                  trailing: option == scanMethod ? Icon(CupertinoIcons.checkmark_alt, color: blue) : null,
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    ref.read(scanMethodProvider.notifier).set(option);
-                  },
+                  leading: IconTile(icon: CupertinoIcons.barcode, color: CupertinoColors.systemGreen),
+                  title: Text('USB Scanner'),
+                  additionalInfo: Text('Keyboard mode'),
                 ),
-            ],
-          ),
+              ],
+            )
+          else
+            Section(
+              header: 'Scanning',
+              footer: '${scanMethod.description} You can also switch in the camera.',
+              children: [
+                for (final option in ScanMethod.values)
+                  CupertinoListTile(
+                    leading: IconTile(
+                      icon: option == ScanMethod.text ? CupertinoIcons.textformat : CupertinoIcons.qrcode,
+                      color: option == ScanMethod.text ? CupertinoColors.systemTeal : CupertinoColors.systemPurple,
+                    ),
+                    title: Text(option.label),
+                    trailing: option == scanMethod ? Icon(CupertinoIcons.checkmark_alt, color: blue) : null,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      ref.read(scanMethodProvider.notifier).set(option);
+                    },
+                  ),
+              ],
+            ),
           Section(
             header: 'ABOUT',
             footer: 'All data is stored only on this device and is not included in backups.',

@@ -54,13 +54,7 @@ class ScannedLabel {
       if (lcsc == null && _lcscCode.hasMatch(line)) lcsc = line;
     }
     if (mpn == null || mpn.length < 3 || !mpn.contains(RegExp(r'[0-9]'))) return null;
-    return ScannedLabel(
-      raw: lines.join('\n'),
-      mpn: mpn,
-      source: LabelSource.text,
-      supplierPart: lcsc,
-      quantity: qty,
-    );
+    return ScannedLabel(raw: lines.join('\n'), mpn: mpn, source: LabelSource.text, supplierPart: lcsc, quantity: qty);
   }
 
   /// First word of [text], without trailing punctuation OCR tends to pick up.
