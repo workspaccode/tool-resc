@@ -161,6 +161,7 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
                 ),
             ],
           ),
+          _MpnStats(table: _table, mpnIndex: _mpnIndex),
           if (_table.rows.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.fromLTRB(36, 16, 36, 8),
@@ -173,6 +174,47 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
       ),
     );
   }
+}
+
+/// What the chosen MPN column means for the import, so a wrong column is
+/// obvious before importing.
+class _MpnStats extends StatelessWidget {
+  const _MpnStats({required this.table, required this.mpnIndex});
+
+  final ExcelTable table;
+  final int mpnIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = table.rows.map((r) => mpnKey(r[mpnIndex])).toList();
+    final empty = keys.where((k) => k.isEmpty).length;
+    final saved = keys.length - empty;
+    final unique = keys.where((k) => k.isNotEmpty).toSet().length;
+    final warn = context.resolve(CupertinoColors.systemOrange);
+
+    return Section(
+      header: 'Will be saved',
+      footer: [
+        if (empty > 0) 'Rows with an empty MPN can’t be searched or scanned, so they are skipped.',
+        if (unique > 0 && unique * 2 < saved)
+          'Many rows share the same MPN. Each row is still saved. If this is unexpected, check the MPN column.',
+      ].join(' ').nullIfEmpty,
+      children: [
+        CupertinoListTile(title: const Text('Rows'), additionalInfo: Text('$saved')),
+        CupertinoListTile(title: const Text('Different MPNs'), additionalInfo: Text('$unique')),
+        if (empty > 0)
+          CupertinoListTile(
+            leading: Icon(CupertinoIcons.exclamationmark_triangle_fill, color: warn, size: 22),
+            title: const Text('Skipped (empty MPN)'),
+            additionalInfo: Text('$empty', style: TextStyle(color: warn)),
+          ),
+      ],
+    );
+  }
+}
+
+extension on String {
+  String? get nullIfEmpty => isEmpty ? null : this;
 }
 
 class _CheckRow extends StatelessWidget {

@@ -45,12 +45,19 @@ void main() {
     expect(hit.items.single.values['LCSC Part Number'], 'C141700');
     expect(hit.items.single.values['Quantity'], '100');
 
+    // Scans match tolerantly: OCR read "O" for "0".
+    expect(repo.matchKey('RCO805FR-0782OKL'), 'RC0805FR07820KL');
+    expect(repo.matchKey('RC0805FR-07820KL'), 'RC0805FR07820KL');
+    expect(repo.matchKey('NOT-A-PART-99'), isNull);
+    expect((await repo.rowsFor('RC0805FR07820KL')).single.mpn, 'RC0805FR-07820KL');
+
     // Exact match ranks before longer matches.
     final partial = await repo.search('0805');
     expect(partial.total, 2);
     expect(partial.items.first.mpn, '0805W8F1002T5E'); // prefix match first
 
-    // Merge: same MPN updates, a new field is appended, other fields kept.
+    // Merge: an MPN's rows pair up in order; paired rows update (keeping
+    // fields the file lacks), extra file rows are added.
     final merged = await repo.import(
       headers: ['manufacture part number', 'Quantity', 'Location'],
       rows: [
@@ -61,14 +68,27 @@ void main() {
       mpnIndex: 0,
       mode: ImportMode.merge,
     );
-    expect((merged.inserted, merged.updated, merged.duplicates), (1, 1, 1));
-    expect(repo.count, 4);
+    expect((merged.inserted, merged.updated, merged.removed), (2, 1, 0));
+    expect(repo.count, 5);
     expect(repo.fields.last, 'Location');
     final updated = (await repo.search('RC0805FR-07820KL')).items.single;
     expect(updated.values['Quantity'], '250');
     expect(updated.values['Location'], 'Drawer A3');
     expect(updated.values['Manufacturer'], 'YAGEO');
-    expect((await repo.search('NEWPART1')).items.single.values['Quantity'], '6');
+    final newRows = (await repo.search('NEWPART1')).items;
+    expect(newRows.map((c) => c.values['Location']), ['Drawer B1', 'Drawer B2']);
+
+    // Merging fewer rows for an MPN removes its extra rows.
+    final shrunk = await repo.import(
+      headers: ['MPN', 'Quantity'],
+      rows: [
+        ['NEW-PART-1', '9'],
+      ],
+      mpnIndex: 0,
+      mode: ImportMode.merge,
+    );
+    expect((shrunk.inserted, shrunk.updated, shrunk.removed), (0, 1, 1));
+    expect((await repo.search('NEWPART1')).items.single.values['Location'], 'Drawer B1');
 
     // Replace wipes old fields and rows.
     await repo.import(
@@ -81,6 +101,23 @@ void main() {
     );
     expect(repo.count, 1);
     expect(repo.fields, ['MPN']);
+  });
+
+  test('keeps every row when many rows share an MPN', () async {
+    // e.g. 200 reels/bags of only 8 different parts.
+    final rows = [
+      for (var i = 0; i < 200; i++) ['PART-${i % 8}', 'Bin ${i + 1}'],
+    ];
+    final result = await repo.import(headers: ['MPN', 'Location'], rows: rows, mpnIndex: 0, mode: ImportMode.replace);
+    expect(result.inserted, 200);
+    expect(repo.count, 200);
+    expect(repo.mpnCount, 8);
+
+    final part3 = await repo.rowsFor(repo.matchKey('part 3')!);
+    expect(part3, hasLength(25));
+    expect(part3.first.values['Location'], 'Bin 4');
+    final search = await repo.search('PART-3');
+    expect(search.total, 25);
   });
 
   test('reads shared strings, offset columns, dates and duplicate headers', () async {

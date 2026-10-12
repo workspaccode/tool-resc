@@ -22,6 +22,7 @@ class _SettingsSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final appearance = ref.watch(appearanceProvider);
+    final scanMethod = ref.watch(scanMethodProvider);
     final blue = context.resolve(CupertinoColors.systemBlue);
 
     return CupertinoPageScaffold(
@@ -59,6 +60,25 @@ class _SettingsSheet extends ConsumerWidget {
                   onTap: () {
                     HapticFeedback.selectionClick();
                     ref.read(appearanceProvider.notifier).set(option);
+                  },
+                ),
+            ],
+          ),
+          Section(
+            header: 'Scanning',
+            footer: '${scanMethod.description} You can also switch in the camera.',
+            children: [
+              for (final option in ScanMethod.values)
+                CupertinoListTile(
+                  leading: IconTile(
+                    icon: option == ScanMethod.text ? CupertinoIcons.textformat : CupertinoIcons.qrcode,
+                    color: option == ScanMethod.text ? CupertinoColors.systemTeal : CupertinoColors.systemPurple,
+                  ),
+                  title: Text(option.label),
+                  trailing: option == scanMethod ? Icon(CupertinoIcons.checkmark_alt, color: blue) : null,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    ref.read(scanMethodProvider.notifier).set(option);
                   },
                 ),
             ],

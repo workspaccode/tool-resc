@@ -45,29 +45,29 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
   }
 
   Future<void> _scan() async {
-    final raw = await Navigator.of(context).push<String>(
-      CupertinoPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => const ScannerScreen(),
-      ),
+    final label = await Navigator.of(context).push<ScannedLabel>(
+      CupertinoPageRoute(fullscreenDialog: true, builder: (_) => const ScannerScreen()),
     );
-    if (raw == null || !mounted) return;
+    if (label == null || !mounted) return;
 
-    final label = ScannedLabel.parse(raw);
-    _search.text = label.mpn;
-    ref.read(searchQueryProvider.notifier).set(label.mpn);
+    // OCR may misread similar characters (O/0, I/1...); match tolerantly and
+    // show the MPN as stored in the database.
+    final repo = ref.read(componentsRepositoryProvider);
+    final key = repo.matchKey(label.mpn);
+    final rows = key == null ? const <Component>[] : await repo.rowsFor(key);
+    if (!mounted) return;
+
+    final mpn = rows.firstOrNull?.mpn ?? label.mpn;
+    _search.text = mpn;
+    ref.read(searchQueryProvider.notifier).set(mpn);
     ref.read(scannedLabelProvider.notifier).set(label);
 
-    final results = await ref.read(searchResultsProvider.future);
-    final exact = results.items
-        .where((c) => c.key == mpnKey(label.mpn))
-        .toList();
-    if (!mounted) return;
-    if (exact.length == 1) {
-      HapticFeedback.heavyImpact();
-      _open(exact.single);
-    } else if (results.total == 0) {
+    // One row opens directly; several rows for the MPN stay listed.
+    if (rows.isEmpty) {
       HapticFeedback.vibrate();
+    } else {
+      HapticFeedback.heavyImpact();
+      if (rows.length == 1) _open(rows.single);
     }
   }
 
@@ -115,10 +115,10 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
     _alert(
       'Import Complete',
       [
-        '${result.inserted} added',
-        if (result.updated > 0) '${result.updated} updated',
-        if (result.duplicates > 0) '${result.duplicates} duplicate rows merged',
-        if (result.skipped > 0) '${result.skipped} rows skipped (no MPN)',
+        '${result.inserted} rows added',
+        if (result.updated > 0) '${result.updated} rows updated',
+        if (result.removed > 0) '${result.removed} old rows removed',
+        if (result.skipped > 0) '${result.skipped} rows skipped (empty MPN)',
       ].join('\n'),
     );
   }
@@ -263,7 +263,8 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
                 SliverToBoxAdapter(
                   child: _ScanResultCard(
                     label: label,
-                    found: results.total > 0,
+                    mpn: query,
+                    found: ref.read(componentsRepositoryProvider).matchKey(label.mpn) != null,
                   ),
                 ),
               if (query.trim().isEmpty)
@@ -287,7 +288,7 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
                         _ResultRow(
                           component: c,
                           mpnField: catalog.mpnField,
-                          exact: c.key == mpnKey(query),
+                          exact: c.mpnKey == mpnKey(query),
                           onTap: () => _open(c),
                         ),
                     ],
@@ -390,9 +391,12 @@ class _ResultRow extends StatelessWidget {
 }
 
 class _ScanResultCard extends StatelessWidget {
-  const _ScanResultCard({required this.label, required this.found});
+  const _ScanResultCard({required this.label, required this.mpn, required this.found});
 
   final ScannedLabel label;
+
+  /// The MPN as stored when found, else as read from the label.
+  final String mpn;
   final bool found;
 
   @override
@@ -402,6 +406,8 @@ class _ScanResultCard extends StatelessWidget {
         : CupertinoColors.systemRed;
     final secondary = context.resolve(CupertinoColors.secondaryLabel);
     final details = [
+      ('Read from', label.source == LabelSource.text ? 'MPN text' : 'QR code'),
+      if (found && mpnKey(label.mpn) != mpnKey(mpn)) ('Read as', label.mpn),
       if (label.supplierPart != null) ('Supplier', label.supplierPart!),
       if (label.quantity != null) ('Qty', label.quantity!),
       if (label.orderNumber != null) ('Order', label.orderNumber!),
@@ -436,7 +442,7 @@ class _ScanResultCard extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        Text(label.mpn, style: AppText.mpn),
+                        Text(mpn, style: AppText.mpn),
                       ],
                     ),
                   ),
@@ -513,13 +519,13 @@ class _Hint extends StatelessWidget {
           const Text('Find a Component', style: AppText.title2),
           const SizedBox(height: 6),
           Text(
-            'Search by MPN or scan the QR code on a reel or bag label.',
+            'Search by MPN, or scan the label on a reel or bag by its “MPN:” line or QR code.',
             textAlign: TextAlign.center,
             style: AppText.subheadline.copyWith(color: secondary),
           ),
           const SizedBox(height: 20),
           Text(
-            '${catalog.count} components · ${catalog.fields.length} fields',
+            '${catalog.count} rows · ${catalog.mpnCount} MPNs · ${catalog.fields.length} fields',
             style: AppText.footnote.copyWith(
               color: secondary,
               fontFeatures: const [FontFeature.tabularFigures()],

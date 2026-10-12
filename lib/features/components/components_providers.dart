@@ -12,9 +12,13 @@ final componentsRepositoryProvider = Provider<ComponentsRepository>(
 
 /// Summary of what's in the database.
 class Catalog {
-  const Catalog({required this.count, required this.fields, required this.mpnField});
+  const Catalog({required this.count, required this.mpnCount, required this.fields, required this.mpnField});
 
+  /// Number of rows.
   final int count;
+
+  /// Number of different MPNs.
+  final int mpnCount;
   final List<String> fields;
   final String? mpnField;
 
@@ -29,7 +33,7 @@ class CatalogNotifier extends Notifier<Catalog> {
 
   Catalog _snapshot() {
     final repo = ref.read(componentsRepositoryProvider);
-    return Catalog(count: repo.count, fields: repo.fields, mpnField: repo.mpnField);
+    return Catalog(count: repo.count, mpnCount: repo.mpnCount, fields: repo.fields, mpnField: repo.mpnField);
   }
 
   Future<ImportResult> import({

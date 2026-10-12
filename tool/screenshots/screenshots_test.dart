@@ -93,7 +93,7 @@ void main() {
     container.read(searchQueryProvider.notifier).set('RC0805FR-07820KL');
     container
         .read(scannedLabelProvider.notifier)
-        .set(ScannedLabel.parse('{on:WM2609230751,pc:C141700,pm:RC0805FR-07820KL,qty:100}'));
+        .set(ScannedLabel.fromText(['C141700', 'QTY: 100', 'MPN:RCO805FR-0782OKL']));
     await shot('6_scanned');
 
     await tester.tap(find.text('RC0805FR-07820KL').last);
