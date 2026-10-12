@@ -1,304 +1,618 @@
-import 'dart:async';
-
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/theme.dart';
+import '../../widgets/section.dart';
+import '../../widgets/glass.dart';
+import '../../widgets/icon_tile.dart';
 import 'component_detail_screen.dart';
-import 'components_db.dart';
+import 'components_providers.dart';
+import 'components_repository.dart';
 import 'excel_reader.dart';
-import 'import_screen.dart';
+import 'import_sheet.dart';
 import 'label_parser.dart';
 import 'scanner_screen.dart';
 
 /// Components tool: search the imported parts by MPN, typed or scanned.
-class ComponentsScreen extends StatefulWidget {
+class ComponentsScreen extends ConsumerStatefulWidget {
   const ComponentsScreen({super.key});
 
   @override
-  State<ComponentsScreen> createState() => _ComponentsScreenState();
+  ConsumerState<ComponentsScreen> createState() => _ComponentsScreenState();
 }
 
-class _ComponentsScreenState extends State<ComponentsScreen> {
-  final _search = TextEditingController();
-  Timer? _debounce;
-
-  ComponentsDb? _db;
-  int _count = 0;
-  List<Component> _results = [];
-  ScannedLabel? _scanned;
-  bool _loading = true;
+class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
+  late final TextEditingController _search;
+  bool _reading = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _search = TextEditingController(text: ref.read(searchQueryProvider));
   }
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _search.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    final db = await ComponentsDb.open();
-    final count = await db.count();
-    if (!mounted) return;
-    setState(() {
-      _db = db;
-      _count = count;
-      _loading = false;
-    });
-  }
-
-  void _onQueryChanged(String _) {
-    _scanned = null;
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 200), _runSearch);
-  }
-
-  Future<List<Component>> _runSearch() async {
-    final query = _search.text.trim();
-    final results = query.isEmpty ? <Component>[] : await _db!.search(query);
-    if (mounted) setState(() => _results = results);
-    return results;
+  void _setQuery(String query) {
+    ref.read(scannedLabelProvider.notifier).set(null);
+    ref.read(searchQueryProvider.notifier).set(query);
   }
 
   Future<void> _scan() async {
-    final raw = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const ScannerScreen()));
+    final raw = await Navigator.of(context).push<String>(
+      CupertinoPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const ScannerScreen(),
+      ),
+    );
     if (raw == null || !mounted) return;
+
     final label = ScannedLabel.parse(raw);
     _search.text = label.mpn;
-    setState(() => _scanned = label);
-    final results = await _runSearch();
+    ref.read(searchQueryProvider.notifier).set(label.mpn);
+    ref.read(scannedLabelProvider.notifier).set(label);
 
-    // A single exact match goes straight to its details.
-    if (results.length == 1 && mpnKey(results.first.mpn) == mpnKey(label.mpn) && mounted) {
-      _open(results.first);
+    final results = await ref.read(searchResultsProvider.future);
+    final exact = results.items
+        .where((c) => c.key == mpnKey(label.mpn))
+        .toList();
+    if (!mounted) return;
+    if (exact.length == 1) {
+      HapticFeedback.heavyImpact();
+      _open(exact.single);
+    } else if (results.total == 0) {
+      HapticFeedback.vibrate();
     }
   }
 
   void _open(Component c) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ComponentDetailScreen(component: c)));
-  }
-
-  Future<void> _pickExcel() async {
-    final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx']);
-    if (files.isEmpty || !mounted) return;
-    final file = files.first;
-
-    final messenger = ScaffoldMessenger.of(context);
-    List<ExcelTable> tables;
-    try {
-      setState(() => _loading = true);
-      tables = await readExcel(await file.readAsBytes());
-    } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('تعذرت قراءة الملف: $e')));
-      return;
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-    if (!mounted) return;
-    if (tables.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('الملف فارغ')));
-      return;
-    }
-
-    final result = await Navigator.of(context).push<ImportResult>(
-      MaterialPageRoute(
-        builder: (_) => ImportScreen(fileName: file.name, tables: tables, hasExistingData: _count > 0),
-      ),
-    );
-    if (result == null) return;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          'تمت إضافة ${result.inserted}'
-          '${result.updated > 0 ? ' · تحديث ${result.updated}' : ''}'
-          '${result.skipped > 0 ? ' · تجاهل ${result.skipped} بدون MPN' : ''}',
+    Navigator.of(context).push(
+      CupertinoPageRoute(
+        builder: (_) => ComponentDetailScreen(
+          component: c,
+          mpnField: ref.read(catalogProvider).mpnField,
         ),
       ),
     );
-    await _load();
-    await _runSearch();
   }
 
-  Future<void> _confirmClear() async {
-    final ok = await showDialog<bool>(
+  Future<void> _pickExcel() async {
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+    );
+    if (files.isEmpty || !mounted) return;
+    final file = files.first;
+
+    List<ExcelTable> tables;
+    setState(() => _reading = true);
+    try {
+      tables = await readExcel(await file.readAsBytes());
+    } catch (e) {
+      if (mounted) _alert('Can’t Read File', '$e');
+      return;
+    } finally {
+      if (mounted) setState(() => _reading = false);
+    }
+    if (!mounted) return;
+    if (tables.isEmpty) {
+      _alert('Empty File', 'The file doesn’t contain any data.');
+      return;
+    }
+
+    final result = await showImportSheet(
+      context,
+      fileName: file.name,
+      tables: tables,
+    );
+    if (result == null || !mounted) return;
+    _alert(
+      'Import Complete',
+      [
+        '${result.inserted} added',
+        if (result.updated > 0) '${result.updated} updated',
+        if (result.duplicates > 0) '${result.duplicates} duplicate rows merged',
+        if (result.skipped > 0) '${result.skipped} rows skipped (no MPN)',
+      ].join('\n'),
+    );
+  }
+
+  void _alert(String title, String message) {
+    showCupertinoDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('حذف كل المكونات؟'),
-        content: const Text('سيتم حذف جميع البيانات والحقول المستوردة.'),
+      builder: (context) => CupertinoAlertDialog(
+        title: Text(title),
+        content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('حذف')),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: Navigator.of(context).pop,
+            child: const Text('OK'),
+          ),
         ],
       ),
     );
-    if (ok != true) return;
-    await _db!.clear();
-    _search.clear();
-    setState(() {
-      _results = [];
-      _scanned = null;
-    });
-    await _load();
+  }
+
+  void _showMenu() {
+    final hasData = !ref.read(catalogProvider).isEmpty;
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder: (sheet) => CupertinoActionSheet(
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(sheet);
+              _pickExcel();
+            },
+            child: const Text('Import Excel File'),
+          ),
+          if (hasData)
+            CupertinoActionSheetAction(
+              isDestructiveAction: true,
+              onPressed: () {
+                Navigator.pop(sheet);
+                _confirmClear();
+              },
+              child: const Text('Delete All Components'),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(sheet),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
+  }
+
+  void _confirmClear() {
+    showCupertinoDialog<void>(
+      context: context,
+      builder: (dialog) => CupertinoAlertDialog(
+        title: const Text('Delete All Components?'),
+        content: const Text(
+          'All imported components and fields will be removed from this device.',
+        ),
+        actions: [
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.pop(dialog),
+            child: const Text('Cancel'),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () {
+              Navigator.pop(dialog);
+              _search.clear();
+              ref.read(catalogProvider.notifier).clear();
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('المكونات'),
-        actions: [
-          IconButton(tooltip: 'استيراد Excel', icon: const Icon(Icons.upload_file), onPressed: _loading ? null : _pickExcel),
-          PopupMenuButton<void>(
-            itemBuilder: (_) => [
-              PopupMenuItem(enabled: _count > 0, onTap: _confirmClear, child: const Text('حذف كل البيانات')),
+    final catalog = ref.watch(catalogProvider);
+    final menuButton = CupertinoButton(
+      padding: EdgeInsets.zero,
+      onPressed: _reading ? null : _showMenu,
+      child: _reading
+          ? const CupertinoActivityIndicator()
+          : const Icon(CupertinoIcons.ellipsis_circle, size: 26),
+    );
+
+    if (catalog.isEmpty) {
+      return CupertinoPageScaffold(
+        child: CustomScrollView(
+          slivers: [
+            CupertinoSliverNavigationBar(
+              largeTitle: const Text('Components'),
+              previousPageTitle: 'Tools',
+              trailing: menuButton,
+            ),
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptyState(loading: _reading, onImport: _pickExcel),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final query = ref.watch(searchQueryProvider);
+    final label = ref.watch(scannedLabelProvider);
+    // Keep showing the previous results while the next search runs.
+    final results =
+        ref.watch(searchResultsProvider).value ?? SearchResults.empty;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return CupertinoPageScaffold(
+      child: Stack(
+        children: [
+          CustomScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              CupertinoSliverNavigationBar.search(
+                largeTitle: const Text('Components'),
+                previousPageTitle: 'Tools',
+                trailing: menuButton,
+                searchField: CupertinoSearchTextField(
+                  controller: _search,
+                  placeholder: 'Search by MPN',
+                  autocorrect: false,
+                  smartDashesType: SmartDashesType.disabled,
+                  smartQuotesType: SmartQuotesType.disabled,
+                  enableIMEPersonalizedLearning: false,
+                  onChanged: _setQuery,
+                  onSuffixTap: () {
+                    _search.clear();
+                    _setQuery('');
+                  },
+                ),
+              ),
+              if (label != null)
+                SliverToBoxAdapter(
+                  child: _ScanResultCard(
+                    label: label,
+                    found: results.total > 0,
+                  ),
+                ),
+              if (query.trim().isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _Hint(catalog: catalog),
+                )
+              else if (results.total == 0)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _NoResults(query: query),
+                )
+              else
+                SliverToBoxAdapter(
+                  child: Section(
+                    header: results.total > results.items.length
+                        ? 'TOP ${results.items.length} OF ${results.total} RESULTS'
+                        : '${results.total} ${results.total == 1 ? 'RESULT' : 'RESULTS'}',
+                    children: [
+                      for (final c in results.items)
+                        _ResultRow(
+                          component: c,
+                          mpnField: catalog.mpnField,
+                          exact: c.key == mpnKey(query),
+                          onTap: () => _open(c),
+                        ),
+                    ],
+                  ),
+                ),
+              SliverPadding(
+                padding: EdgeInsets.only(bottom: 110 + bottomInset),
+              ),
             ],
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: bottomInset + 16,
+            child: Center(child: _ScanButton(onPressed: _scan)),
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _count == 0
-              ? _EmptyState(onImport: _pickExcel)
-              : _buildSearch(context),
-      floatingActionButton: _count == 0 || _loading
-          ? null
-          : FloatingActionButton.extended(onPressed: _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('مسح')),
-    );
-  }
-
-  Widget _buildSearch(BuildContext context) {
-    final theme = Theme.of(context);
-    final query = _search.text.trim();
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: TextField(
-            controller: _search,
-            onChanged: _onQueryChanged,
-            textDirection: TextDirection.ltr,
-            textCapitalization: TextCapitalization.characters,
-            autocorrect: false,
-            decoration: InputDecoration(
-              hintText: 'ابحث برقم MPN',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: query.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.clear),
-                      onPressed: () {
-                        _search.clear();
-                        _onQueryChanged('');
-                      },
-                    ),
-              border: const OutlineInputBorder(),
-              helperText: '$_count مكوّن في قاعدة البيانات',
-            ),
-          ),
-        ),
-        if (_scanned != null) _ScannedCard(label: _scanned!, found: _results.isNotEmpty),
-        Expanded(
-          child: query.isEmpty
-              ? Center(child: Text('اكتب رقم القطعة أو امسح الملصق', style: theme.textTheme.bodyLarge))
-              : _results.isEmpty
-                  ? Center(child: Text('لا توجد نتائج لـ "$query"', style: theme.textTheme.bodyLarge))
-                  : ListView.separated(
-                      padding: const EdgeInsets.only(bottom: 88),
-                      itemCount: _results.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, i) => _ResultTile(
-                        component: _results[i],
-                        exact: mpnKey(_results[i].mpn) == mpnKey(query),
-                        onTap: () => _open(_results[i]),
-                      ),
-                    ),
-        ),
-      ],
     );
   }
 }
 
-class _ResultTile extends StatelessWidget {
-  const _ResultTile({required this.component, required this.exact, required this.onTap});
+class _ScanButton extends StatelessWidget {
+  const _ScanButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Scan label',
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          onPressed();
+        },
+        child: Glass(
+          radius: 30,
+          tint: CupertinoColors.systemBlue,
+          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 16),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                CupertinoIcons.qrcode_viewfinder,
+                color: CupertinoColors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Scan Label',
+                style: AppText.headline.copyWith(color: CupertinoColors.white),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResultRow extends StatelessWidget {
+  const _ResultRow({
+    required this.component,
+    required this.mpnField,
+    required this.exact,
+    required this.onTap,
+  });
 
   final Component component;
+  final String? mpnField;
   final bool exact;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    // Show the first couple of non-MPN fields as a summary.
+    // The first couple of other fields as a summary line.
     final summary = component.values.entries
-        .where((e) => e.value.isNotEmpty && e.value != component.mpn)
+        .where((e) => e.key != mpnField)
         .take(2)
         .map((e) => e.value)
         .join(' · ');
-    return ListTile(
-      leading: Icon(exact ? Icons.check_circle : Icons.memory, color: exact ? Colors.green : null),
-      title: Text(component.mpn, textDirection: TextDirection.ltr, textAlign: TextAlign.start),
-      subtitle: summary.isEmpty ? null : Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis),
-      trailing: const Icon(Icons.chevron_left),
+    return CupertinoListTile(
+      padding: const EdgeInsetsDirectional.fromSTEB(20, 10, 14, 10),
+      leading: IconTile(
+        icon: exact
+            ? CupertinoIcons.checkmark_seal_fill
+            : CupertinoIcons.cube_box_fill,
+        color: exact ? CupertinoColors.systemGreen : CupertinoColors.systemGrey,
+      ),
+      title: Text(component.mpn, style: AppText.mpn),
+      subtitle: summary.isEmpty
+          ? null
+          : Text(summary, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: const CupertinoListTileChevron(),
       onTap: onTap,
     );
   }
 }
 
-class _ScannedCard extends StatelessWidget {
-  const _ScannedCard({required this.label, required this.found});
+class _ScanResultCard extends StatelessWidget {
+  const _ScanResultCard({required this.label, required this.found});
 
   final ScannedLabel label;
   final bool found;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final color = found
+        ? CupertinoColors.systemGreen
+        : CupertinoColors.systemRed;
+    final secondary = context.resolve(CupertinoColors.secondaryLabel);
     final details = [
-      if (label.supplierPart != null) 'كود المورد: ${label.supplierPart}',
-      if (label.quantity != null) 'الكمية: ${label.quantity}',
-      if (label.orderNumber != null) 'الطلب: ${label.orderNumber}',
-    ].join(' · ');
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      color: found ? scheme.secondaryContainer : scheme.errorContainer,
-      child: ListTile(
-        leading: Icon(found ? Icons.verified : Icons.error_outline),
-        title: Text(found ? 'تم المسح: ${label.mpn}' : 'غير موجود: ${label.mpn}'),
-        subtitle: details.isEmpty ? null : Text(details),
+      if (label.supplierPart != null) ('Supplier', label.supplierPart!),
+      if (label.quantity != null) ('Qty', label.quantity!),
+      if (label.orderNumber != null) ('Order', label.orderNumber!),
+    ];
+
+    return Section(
+      header: 'SCANNED LABEL',
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    found
+                        ? CupertinoIcons.checkmark_circle_fill
+                        : CupertinoIcons.xmark_octagon_fill,
+                    color: context.resolve(color),
+                    size: 30,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          found ? 'In Database' : 'Not in Database',
+                          style: AppText.footnote.copyWith(
+                            color: context.resolve(color),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(label.mpn, style: AppText.mpn),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (details.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final (name, value) in details)
+                      DecoratedBox(
+                        decoration: ShapeDecoration(
+                          shape: const StadiumBorder(),
+                          color: context.resolve(
+                            CupertinoColors.tertiarySystemFill,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: '$name  ',
+                                  style: TextStyle(color: secondary),
+                                ),
+                                TextSpan(
+                                  text: value,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            style: AppText.footnote,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Hint extends StatelessWidget {
+  const _Hint({required this.catalog});
+
+  final Catalog catalog;
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = context.resolve(CupertinoColors.secondaryLabel);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(40, 24, 40, 140),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            CupertinoIcons.barcode_viewfinder,
+            size: 64,
+            color: context.resolve(CupertinoColors.tertiaryLabel),
+          ),
+          const SizedBox(height: 16),
+          const Text('Find a Component', style: AppText.title2),
+          const SizedBox(height: 6),
+          Text(
+            'Search by MPN or scan the QR code on a reel or bag label.',
+            textAlign: TextAlign.center,
+            style: AppText.subheadline.copyWith(color: secondary),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '${catalog.count} components · ${catalog.fields.length} fields',
+            style: AppText.footnote.copyWith(
+              color: secondary,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NoResults extends StatelessWidget {
+  const _NoResults({required this.query});
+
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(40, 24, 40, 140),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            CupertinoIcons.search,
+            size: 56,
+            color: context.resolve(CupertinoColors.tertiaryLabel),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No Results for “$query”',
+            style: AppText.title3,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Check the spelling or try part of the MPN.',
+            textAlign: TextAlign.center,
+            style: AppText.subheadline.copyWith(
+              color: context.resolve(CupertinoColors.secondaryLabel),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onImport});
+  const _EmptyState({required this.loading, required this.onImport});
 
+  final bool loading;
   final VoidCallback onImport;
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.inventory_2_outlined, size: 72, color: Theme.of(context).colorScheme.outline),
-            const SizedBox(height: 16),
-            Text('لا توجد مكونات بعد', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            const Text(
-              'استورد ملف Excel. سيتحول كل عمود فيه إلى حقل في قاعدة البيانات.',
-              textAlign: TextAlign.center,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(40, 0, 40, 80),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const IconTile(
+            icon: CupertinoIcons.tray_arrow_down_fill,
+            color: CupertinoColors.systemBlue,
+            size: 84,
+          ),
+          const SizedBox(height: 24),
+          const Text('No Components', style: AppText.title1),
+          const SizedBox(height: 8),
+          Text(
+            'Import an Excel file. Each column becomes a field you can search and scan against.',
+            textAlign: TextAlign.center,
+            style: AppText.body.copyWith(
+              color: context.resolve(CupertinoColors.secondaryLabel),
             ),
-            const SizedBox(height: 24),
-            FilledButton.icon(onPressed: onImport, icon: const Icon(Icons.upload_file), label: const Text('استيراد Excel')),
-          ],
-        ),
+          ),
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            child: CupertinoButton.filled(
+              borderRadius: BorderRadius.circular(14),
+              onPressed: loading ? null : onImport,
+              child: loading
+                  ? const CupertinoActivityIndicator(
+                      color: CupertinoColors.white,
+                    )
+                  : const Text(
+                      'Import Excel File',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }

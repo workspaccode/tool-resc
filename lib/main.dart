@@ -1,25 +1,39 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show DefaultMaterialLocalizations;
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'home_screen.dart';
+import 'app/settings.dart';
+import 'app/storage.dart';
+import 'app/theme.dart';
+import 'features/home/home_screen.dart';
 
-void main() {
-  runApp(const ToolRescApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(systemNavigationBarColor: Color(0x00000000), systemNavigationBarContrastEnforced: false),
+  );
+  await initStorage();
+  runApp(const ProviderScope(child: ToolRescApp()));
 }
 
-class ToolRescApp extends StatelessWidget {
+class ToolRescApp extends ConsumerWidget {
   const ToolRescApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'tool-resc',
+  Widget build(BuildContext context, WidgetRef ref) {
+    final appearance = ref.watch(appearanceProvider);
+    return CupertinoApp(
+      title: 'Tool Resc',
       debugShowCheckedModeBanner: false,
-      locale: const Locale('ar'),
-      supportedLocales: const [Locale('ar'), Locale('en')],
-      localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
-      darkTheme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark)),
+      theme: buildTheme(appearance.brightness),
+      // Material localizations back the text selection toolbar on Android.
+      localizationsDelegates: const [
+        DefaultMaterialLocalizations.delegate,
+        DefaultCupertinoLocalizations.delegate,
+        DefaultWidgetsLocalizations.delegate,
+      ],
       home: const HomeScreen(),
     );
   }

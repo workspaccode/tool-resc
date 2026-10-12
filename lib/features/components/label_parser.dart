@@ -6,13 +6,7 @@
 /// - 1D barcode carrying a `1P` data identifier: `1PRC0805FR-07820KL`
 /// - Anything else is treated as the MPN itself.
 class ScannedLabel {
-  const ScannedLabel({
-    required this.raw,
-    required this.mpn,
-    this.supplierPart,
-    this.quantity,
-    this.orderNumber,
-  });
+  const ScannedLabel({required this.raw, required this.mpn, this.supplierPart, this.quantity, this.orderNumber});
 
   final String raw;
   final String mpn;

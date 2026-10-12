@@ -50,11 +50,14 @@ class _XlsxReader {
 
   List<ExcelTable> read() {
     final workbook = _xml('xl/workbook.xml');
-    if (workbook == null) throw const FormatException('ليس ملف xlsx صالحاً');
+    if (workbook == null) throw const FormatException('Not a valid .xlsx file');
 
     final rels = <String, ({String type, String target})>{};
     for (final r in _xml('xl/_rels/workbook.xml.rels')?.findAllElements('Relationship') ?? <XmlElement>[]) {
-      rels[r.getAttribute('Id')!] = (type: r.getAttribute('Type')!.split('/').last, target: _resolve(r.getAttribute('Target')!));
+      rels[r.getAttribute('Id')!] = (
+        type: r.getAttribute('Type')!.split('/').last,
+        target: _resolve(r.getAttribute('Target')!),
+      );
     }
     String? partOf(String type) => rels.values.where((r) => r.type == type).firstOrNull?.target;
 
@@ -116,7 +119,8 @@ class _XlsxReader {
 
     final cellXfs = styles.findAllElements('cellXfs').firstOrNull;
     return [
-      for (final xf in cellXfs?.findElements('xf') ?? <XmlElement>[]) isDate(int.parse(xf.getAttribute('numFmtId') ?? '0')),
+      for (final xf in cellXfs?.findElements('xf') ?? <XmlElement>[])
+        isDate(int.parse(xf.getAttribute('numFmtId') ?? '0')),
     ];
   }
 
@@ -199,7 +203,7 @@ ExcelTable? _toTable(String name, List<List<String>> rows) {
   final seen = <String, int>{};
   final headers = <String>[];
   for (final i in keep) {
-    var h = cell(rawHeaders, i).isEmpty ? 'عمود ${i + 1}' : rawHeaders[i];
+    var h = cell(rawHeaders, i).isEmpty ? 'Column ${i + 1}' : rawHeaders[i];
     final count = seen.update(h.toLowerCase(), (n) => n + 1, ifAbsent: () => 1);
     if (count > 1) h = '$h ($count)';
     headers.add(h);

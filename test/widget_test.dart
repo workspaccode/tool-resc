@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tool_resc/features/components/components_db.dart';
+import 'package:tool_resc/features/components/components_repository.dart';
 import 'package:tool_resc/features/components/label_parser.dart';
 
 void main() {
