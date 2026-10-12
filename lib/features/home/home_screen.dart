@@ -7,6 +7,7 @@ import '../../widgets/section.dart';
 import '../../widgets/clickable_tile.dart';
 import '../../widgets/icon_tile.dart';
 import '../components/components_providers.dart';
+import '../components/component_lists_ui.dart';
 import '../components/components_screen.dart';
 import 'settings_sheet.dart';
 
@@ -18,6 +19,7 @@ class Tool {
     required this.color,
     required this.builder,
     this.status,
+    this.sidebarSection,
   });
 
   final String title;
@@ -28,6 +30,9 @@ class Tool {
 
   /// Optional live detail shown on the row, e.g. an item count.
   final String? Function(WidgetRef ref)? status;
+
+  /// Extra sidebar items shown under the tool while it's open (wide layout).
+  final WidgetBuilder? sidebarSection;
 }
 
 /// Available tools. New features are added here.
@@ -38,6 +43,7 @@ final tools = <Tool>[
     icon: CupertinoIcons.cube_box_fill,
     color: CupertinoColors.systemBlue,
     builder: (_) => const ComponentsScreen(),
+    sidebarSection: (_) => const ComponentListsSidebar(),
     status: (ref) {
       final count = ref.watch(catalogProvider).count;
       return count == 0 ? null : '$count';
@@ -156,15 +162,17 @@ class _Sidebar extends ConsumerWidget {
               style: AppText.caption.copyWith(color: secondary, fontWeight: FontWeight.w600),
             ),
           ),
-          for (var i = 0; i < tools.length; i++)
+          for (var i = 0; i < tools.length; i++) ...[
             _SidebarItem(
               icon: tools[i].icon,
               color: tools[i].color,
               title: tools[i].title,
-              badge: tools[i].status?.call(ref),
+              badge: tools[i].sidebarSection == null ? tools[i].status?.call(ref) : null,
               selected: i == current,
               onTap: () => onSelect(i),
             ),
+            if (i == current && tools[i].sidebarSection != null) tools[i].sidebarSection!(context),
+          ],
           const Spacer(),
           _SidebarItem(
             icon: CupertinoIcons.gear_alt_fill,

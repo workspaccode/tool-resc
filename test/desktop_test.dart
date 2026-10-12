@@ -1,11 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive_ce/hive_ce.dart';
 import 'package:tool_resc/app/storage.dart';
+import 'package:tool_resc/features/components/component_lists.dart';
 import 'package:tool_resc/features/components/components_providers.dart';
 import 'package:tool_resc/features/components/components_repository.dart';
 import 'package:tool_resc/main.dart';
@@ -18,10 +19,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.runAsync(() async {
-      Hive.init((await Directory.systemTemp.createTemp('desktop_test')).path);
-      await Hive.openBox<Object>(Boxes.settings);
-      await Hive.openBox<Object>(Boxes.componentsMeta);
-      await Hive.openLazyBox<Map>(Boxes.components);
+      await initStorage(path: (await Directory.systemTemp.createTemp('desktop_test')).path);
     });
     final container = ProviderContainer();
     addTearDown(container.dispose);
@@ -80,7 +78,30 @@ void main() {
     // The part opened in the detail pane, with its fields.
     expect(find.text('No Component Selected'), findsNothing);
     expect(find.text('Drawer B1'), findsOneWidget);
-    expect(find.text('In Database'), findsOneWidget);
+    expect(find.text('In This List'), findsOneWidget);
+
+    // A second list: the title and sidebar follow the active list.
+    await tester.runAsync(() async {
+      await container.read(listsProvider.notifier).create('BOM F280033');
+      await container
+          .read(catalogProvider.notifier)
+          .import(
+            headers: ['MPN'],
+            rows: [
+              ['ABC123'],
+            ],
+            mpnIndex: 0,
+            mode: ImportMode.replace,
+          );
+    });
+    await settle();
+    final navBar = find.byType(CupertinoSliverNavigationBar);
+    expect(find.descendant(of: navBar, matching: find.text('BOM F280033')), findsWidgets);
+    expect(find.descendant(of: navBar, matching: find.text('Main List')), findsNothing);
+
+    // The part from the first list is reported as being in another list.
+    expect(find.text('Not in This List'), findsOneWidget);
+    expect(find.text('Found in'), findsOneWidget);
 
     debugDefaultTargetPlatformOverride = null;
   });

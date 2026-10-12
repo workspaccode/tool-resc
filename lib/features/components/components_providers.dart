@@ -1,16 +1,16 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_ce/hive_ce.dart';
 
-import '../../app/storage.dart';
+import 'component_lists.dart';
 import 'components_repository.dart';
 import 'label_parser.dart';
 
+/// The active list's repository; switching lists rebuilds everything that
+/// depends on it (catalog, search results).
 final componentsRepositoryProvider = Provider<ComponentsRepository>(
-  (ref) =>
-      ComponentsRepository(meta: Hive.box<Object>(Boxes.componentsMeta), items: Hive.lazyBox<Map>(Boxes.components)),
+  (ref) => ref.watch(listRepositoryProvider(ref.watch(listsProvider.select((s) => s.activeId)))),
 );
 
-/// Summary of what's in the database.
+/// Summary of what's in the active list.
 class Catalog {
   const Catalog({required this.count, required this.mpnCount, required this.fields, required this.mpnField});
 
@@ -29,7 +29,10 @@ class CatalogNotifier extends Notifier<Catalog> {
   ComponentsRepository get _repo => ref.read(componentsRepositoryProvider);
 
   @override
-  Catalog build() => _snapshot();
+  Catalog build() {
+    ref.watch(componentsRepositoryProvider);
+    return _snapshot();
+  }
 
   Catalog _snapshot() {
     final repo = ref.read(componentsRepositoryProvider);
@@ -45,13 +48,6 @@ class CatalogNotifier extends Notifier<Catalog> {
     final result = await _repo.import(headers: headers, rows: rows, mpnIndex: mpnIndex, mode: mode);
     state = _snapshot();
     return result;
-  }
-
-  Future<void> clear() async {
-    await _repo.clear();
-    ref.read(scannedLabelProvider.notifier).set(null);
-    ref.read(searchQueryProvider.notifier).set('');
-    state = _snapshot();
   }
 }
 

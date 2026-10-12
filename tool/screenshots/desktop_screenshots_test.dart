@@ -8,9 +8,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive_ce/hive_ce.dart';
 import 'package:tool_resc/app/settings.dart';
 import 'package:tool_resc/app/storage.dart';
+import 'package:tool_resc/features/components/component_lists.dart';
 import 'package:tool_resc/features/components/components_providers.dart';
 import 'package:tool_resc/features/components/components_repository.dart';
 import 'package:tool_resc/features/components/components_screen.dart';
@@ -41,10 +41,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.runAsync(() async {
-      Hive.init((await Directory.systemTemp.createTemp('desktop_shots')).path);
-      await Hive.openBox<Object>(Boxes.settings);
-      await Hive.openBox<Object>(Boxes.componentsMeta);
-      await Hive.openLazyBox<Map>(Boxes.components);
+      await initStorage(path: (await Directory.systemTemp.createTemp('desktop_shots')).path);
     });
     final container = ProviderContainer();
     addTearDown(container.dispose);
@@ -83,8 +80,27 @@ void main() {
     await _typeLikeScanner('{pc:C141700,pm:RC0805FR-07820KL,qty:100}');
     await shot('4_scanned');
 
+    // A second list; scanning a part that's only in the first one.
+    await tester.runAsync(() async {
+      await container.read(listsProvider.notifier).create('BOM F280033');
+      await container
+          .read(catalogProvider.notifier)
+          .import(
+            headers: ['MPN', 'Description', 'Designator', 'Quantity'],
+            rows: [
+              ['CC0805KRX7R8BB104', 'CAP CER 100nF 25V X7R 0805', 'C1, C2, C4', '21'],
+              ['CL21B106KOQNNNE', 'CAP CER 10UF 16V X7R 0805', 'C3, C6', '12'],
+              ['LM358DR', 'Dual Op-Amp SOIC-8', 'U1', '1'],
+            ],
+            mpnIndex: 0,
+            mode: ImportMode.replace,
+          );
+    });
+    await _typeLikeScanner('{pc:C141700,pm:RC0805FR-07820KL,qty:100}');
+    await shot('5_other_list');
+
     showSettingsSheet(tester.element(find.byType(ComponentsScreen)));
-    await shot('5_settings');
+    await shot('6_settings');
 
     debugDefaultTargetPlatformOverride = null;
   });

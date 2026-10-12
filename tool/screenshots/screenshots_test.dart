@@ -7,7 +7,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive_ce/hive_ce.dart';
 import 'package:tool_resc/app/settings.dart';
 import 'package:tool_resc/app/storage.dart';
 import 'package:tool_resc/features/components/components_providers.dart';
@@ -42,12 +41,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.runAsync(() async {
-      if (!Hive.isBoxOpen(Boxes.settings)) {
-        Hive.init((await Directory.systemTemp.createTemp('shots')).path);
-      }
-      await (await Hive.openBox<Object>(Boxes.settings)).clear();
-      await (await Hive.openBox<Object>(Boxes.componentsMeta)).clear();
-      await (await Hive.openLazyBox<Map>(Boxes.components)).clear();
+      await initStorage(path: (await Directory.systemTemp.createTemp('shots')).path);
     });
 
     final container = ProviderContainer();

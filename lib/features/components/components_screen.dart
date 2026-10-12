@@ -1,4 +1,3 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,9 +9,10 @@ import '../../widgets/glass.dart';
 import '../../widgets/icon_tile.dart';
 import '../../widgets/section.dart';
 import 'component_detail_screen.dart';
+import 'component_lists.dart';
+import 'component_lists_ui.dart';
 import 'components_providers.dart';
 import 'components_repository.dart';
-import 'excel_reader.dart';
 import 'import_sheet.dart';
 import 'keyboard_scanner.dart';
 import 'label_parser.dart';
@@ -117,58 +117,32 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
   }
 
   Future<void> _pickExcel() async {
-    final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx']);
-    if (files.isEmpty || !mounted) return;
-    final file = files.first;
-
-    List<ExcelTable> tables;
-    setState(() => _reading = true);
-    try {
-      tables = await readExcel(await file.readAsBytes());
-    } catch (e) {
-      if (mounted) _alert('Can’t Read File', '$e');
-      return;
-    } finally {
-      if (mounted) setState(() => _reading = false);
-    }
-    if (!mounted) return;
-    if (tables.isEmpty) {
-      _alert('Empty File', 'The file doesn’t contain any data.');
-      return;
-    }
-
-    final result = await showImportSheet(context, fileName: file.name, tables: tables);
-    if (result == null || !mounted) return;
-    setState(() => _selected = null);
-    _alert(
-      'Import Complete',
-      [
-        '${result.inserted} rows added',
-        if (result.updated > 0) '${result.updated} rows updated',
-        if (result.removed > 0) '${result.removed} old rows removed',
-        if (result.skipped > 0) '${result.skipped} rows skipped (empty MPN)',
-      ].join('\n'),
+    final result = await pickAndImportExcel(
+      context,
+      onReading: (reading) {
+        if (mounted) setState(() => _reading = reading);
+      },
     );
+    if (result != null && mounted) setState(() => _selected = null);
   }
 
-  void _alert(String title, String message) {
-    showCupertinoDialog<void>(
-      context: context,
-      builder: (context) => CupertinoAlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          CupertinoDialogAction(isDefaultAction: true, onPressed: Navigator.of(context).pop, child: const Text('OK')),
-        ],
-      ),
-    );
+  /// Switches to another list, re-checking the scanned label there.
+  void _switchList(String id) => ref.read(listsProvider.notifier).select(id);
+
+  void _onListChanged() {
+    setState(() => _selected = null);
+    // Keep checking the same label in the newly selected list.
+    if (ref.read(scannedLabelProvider) case final label?) _handleLabel(label);
   }
 
   void _showMenu() {
+    final list = ref.read(listsProvider).active;
+    final lastList = ref.read(listsProvider).lists.length == 1;
     final hasData = !ref.read(catalogProvider).isEmpty;
     showCupertinoModalPopup<void>(
       context: context,
       builder: (sheet) => CupertinoActionSheet(
+        title: Text(list.name),
         actions: [
           CupertinoActionSheetAction(
             onPressed: () {
@@ -177,44 +151,24 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
             },
             child: const Text('Import Excel File'),
           ),
-          if (hasData)
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(sheet);
+              renameListDialog(context, ref, list);
+            },
+            child: const Text('Rename List'),
+          ),
+          if (hasData || !lastList)
             CupertinoActionSheetAction(
               isDestructiveAction: true,
               onPressed: () {
                 Navigator.pop(sheet);
-                _confirmClear();
+                deleteListDialog(context, ref, list);
               },
-              child: const Text('Delete All Components'),
+              child: Text(lastList ? 'Clear List' : 'Delete List'),
             ),
         ],
         cancelButton: CupertinoActionSheetAction(onPressed: () => Navigator.pop(sheet), child: const Text('Cancel')),
-      ),
-    );
-  }
-
-  void _confirmClear() {
-    showCupertinoDialog<void>(
-      context: context,
-      builder: (dialog) => CupertinoAlertDialog(
-        title: const Text('Delete All Components?'),
-        content: const Text('All imported components and fields will be removed from this device.'),
-        actions: [
-          CupertinoDialogAction(
-            isDefaultAction: true,
-            onPressed: () => Navigator.pop(dialog),
-            child: const Text('Cancel'),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            onPressed: () {
-              Navigator.pop(dialog);
-              _search.clear();
-              setState(() => _selected = null);
-              ref.read(catalogProvider.notifier).clear();
-            },
-            child: const Text('Delete'),
-          ),
-        ],
       ),
     );
   }
@@ -233,8 +187,17 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         _ToolbarButton(icon: CupertinoIcons.square_arrow_down, tooltip: 'Import Excel File', onPressed: _pickExcel),
+        _ToolbarButton(
+          icon: CupertinoIcons.pencil,
+          tooltip: 'Rename List',
+          onPressed: () => renameListDialog(context, ref, ref.read(listsProvider).active),
+        ),
         if (hasData)
-          _ToolbarButton(icon: CupertinoIcons.trash, tooltip: 'Delete All Components', onPressed: _confirmClear),
+          _ToolbarButton(
+            icon: CupertinoIcons.trash,
+            tooltip: 'Delete List',
+            onPressed: () => deleteListDialog(context, ref, ref.read(listsProvider).active),
+          ),
       ],
     );
   }
@@ -242,15 +205,31 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
   Map<ShortcutActivator, VoidCallback> get _shortcuts {
     final mac = isMacOS;
     SingleActivator cmd(LogicalKeyboardKey key) => SingleActivator(key, meta: mac, control: !mac);
+    const digits = [
+      LogicalKeyboardKey.digit1,
+      LogicalKeyboardKey.digit2,
+      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4,
+      LogicalKeyboardKey.digit5,
+      LogicalKeyboardKey.digit6,
+      LogicalKeyboardKey.digit7,
+      LogicalKeyboardKey.digit8,
+      LogicalKeyboardKey.digit9,
+    ];
+    final lists = ref.read(listsProvider).lists;
     return {
       cmd(LogicalKeyboardKey.keyF): _searchFocus.requestFocus,
       cmd(LogicalKeyboardKey.keyO): _pickExcel,
+      cmd(LogicalKeyboardKey.keyN): _pickExcel,
       const SingleActivator(LogicalKeyboardKey.escape): _clearSearch,
+      // ⌘1…⌘9 / Ctrl+1…9: switch list.
+      for (var i = 0; i < lists.length && i < digits.length; i++) cmd(digits[i]): () => _switchList(lists[i].id),
     };
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(listsProvider.select((s) => s.activeId), (_, _) => _onListChanged());
     return KeyboardScannerListener(
       onScan: _onHardwareScan,
       child: CallbackShortcuts(
@@ -289,6 +268,20 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
     );
   }
 
+  /// Phone-width screen: lists show as chips (wide screens use the sidebar).
+  bool _narrow(BuildContext context) => MediaQuery.sizeOf(context).width < kWideLayout;
+
+  Widget _scanCard(ScannedLabel label, String query) {
+    final found = ref.read(componentsRepositoryProvider).matchKey(label.mpn) != null;
+    return _ScanResultCard(
+      label: label,
+      mpn: query,
+      found: found,
+      otherLists: found ? const [] : ref.read(listsProvider.notifier).othersContaining(label.mpn),
+      onSwitchList: _switchList,
+    );
+  }
+
   Widget _buildList(BuildContext context) {
     final catalog = ref.watch(catalogProvider);
 
@@ -297,10 +290,14 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
         child: CustomScrollView(
           slivers: [
             CupertinoSliverNavigationBar(
-              largeTitle: const Text('Components'),
+              // Keyed by list: the bar doesn't refresh its title otherwise.
+              key: ValueKey(ref.watch(listsProvider).activeId),
+              largeTitle: Text(ref.watch(listsProvider).active.name),
               previousPageTitle: 'Tools',
               trailing: _actions(false),
             ),
+            if (_narrow(context) && ref.watch(listsProvider).lists.length > 1)
+              SliverToBoxAdapter(child: ComponentListChips(onImport: _pickExcel)),
             SliverFillRemaining(
               hasScrollBody: false,
               child: _EmptyState(loading: _reading, onImport: _pickExcel),
@@ -323,7 +320,9 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
               CupertinoSliverNavigationBar.search(
-                largeTitle: const Text('Components'),
+                // Keyed by list: the bar doesn't refresh its title otherwise.
+                key: ValueKey(ref.watch(listsProvider).activeId),
+                largeTitle: Text(ref.watch(listsProvider).active.name),
                 previousPageTitle: 'Tools',
                 trailing: _actions(true),
                 searchField: CupertinoSearchTextField(
@@ -340,14 +339,8 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
                   onSuffixTap: _clearSearch,
                 ),
               ),
-              if (label != null)
-                SliverToBoxAdapter(
-                  child: _ScanResultCard(
-                    label: label,
-                    mpn: query,
-                    found: ref.read(componentsRepositoryProvider).matchKey(label.mpn) != null,
-                  ),
-                ),
+              if (_narrow(context)) SliverToBoxAdapter(child: ComponentListChips(onImport: _pickExcel)),
+              if (label != null) SliverToBoxAdapter(child: _scanCard(label, query)),
               if (query.trim().isEmpty)
                 SliverFillRemaining(hasScrollBody: false, child: _Hint(catalog: catalog))
               else if (results.total == 0)
@@ -557,7 +550,17 @@ class _ResultRow extends StatelessWidget {
 }
 
 class _ScanResultCard extends StatelessWidget {
-  const _ScanResultCard({required this.label, required this.mpn, required this.found});
+  const _ScanResultCard({
+    required this.label,
+    required this.mpn,
+    required this.found,
+    required this.otherLists,
+    required this.onSwitchList,
+  });
+
+  /// Other lists that contain the MPN, when the current one doesn't.
+  final List<ComponentList> otherLists;
+  final ValueChanged<String> onSwitchList;
 
   final ScannedLabel label;
 
@@ -596,7 +599,11 @@ class _ScanResultCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          found ? 'In Database' : 'Not in Database',
+                          found
+                              ? 'In This List'
+                              : otherLists.isEmpty
+                              ? 'Not Found'
+                              : 'Not in This List',
                           style: AppText.footnote.copyWith(color: context.resolve(color), fontWeight: FontWeight.w600),
                         ),
                         Text(mpn, style: AppText.mpn),
@@ -634,6 +641,30 @@ class _ScanResultCard extends StatelessWidget {
                             ),
                             style: AppText.footnote,
                           ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+              if (otherLists.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text('Found in', style: AppText.footnote.copyWith(color: secondary)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final l in otherLists)
+                      CupertinoButton.tinted(
+                        sizeStyle: CupertinoButtonSize.small,
+                        onPressed: () => onSwitchList(l.id),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(l.name),
+                            const SizedBox(width: 4),
+                            const Icon(CupertinoIcons.arrow_right, size: 14),
+                          ],
                         ),
                       ),
                   ],

@@ -1,14 +1,69 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 
 import '../../app/theme.dart';
 import '../../widgets/section.dart';
 import '../../widgets/adaptive_sheet.dart';
 import '../../widgets/icon_tile.dart';
+import 'component_lists.dart';
 import 'components_providers.dart';
 import 'components_repository.dart';
 import 'excel_reader.dart';
+
+/// Picks an .xlsx file, shows the import sheet, and reports the result.
+/// [onReading] is told while the file is being read (for a spinner).
+Future<ImportResult?> pickAndImportExcel(BuildContext context, {ValueChanged<bool>? onReading}) async {
+  final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx']);
+  if (files.isEmpty || !context.mounted) return null;
+  final file = files.first;
+
+  List<ExcelTable> tables;
+  onReading?.call(true);
+  try {
+    tables = await readExcel(await file.readAsBytes());
+  } catch (e) {
+    if (context.mounted) _alert(context, 'Can’t Read File', '$e');
+    return null;
+  } finally {
+    onReading?.call(false);
+  }
+  if (!context.mounted) return null;
+  if (tables.isEmpty) {
+    _alert(context, 'Empty File', 'The file doesn’t contain any data.');
+    return null;
+  }
+
+  final result = await showImportSheet(context, fileName: file.name, tables: tables);
+  if (result != null && context.mounted) {
+    _alert(
+      context,
+      'Import Complete',
+      [
+        '${result.inserted} rows added',
+        if (result.updated > 0) '${result.updated} rows updated',
+        if (result.removed > 0) '${result.removed} old rows removed',
+        if (result.skipped > 0) '${result.skipped} rows skipped (empty MPN)',
+      ].join('\n'),
+    );
+  }
+  return result;
+}
+
+void _alert(BuildContext context, String title, String message) {
+  showCupertinoDialog<void>(
+    context: context,
+    builder: (dialog) => CupertinoAlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        CupertinoDialogAction(isDefaultAction: true, onPressed: () => Navigator.pop(dialog), child: const Text('OK')),
+      ],
+    ),
+  );
+}
 
 /// Shows the import sheet; completes with the result, or null if cancelled.
 Future<ImportResult?> showImportSheet(
@@ -39,6 +94,17 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
   ImportMode _mode = ImportMode.replace;
   bool _importing = false;
 
+  /// Import into a new list (default when the current list has data), or
+  /// into the current one.
+  late bool _newList = !ref.read(catalogProvider).isEmpty;
+  late final _listName = TextEditingController(text: p.basenameWithoutExtension(widget.fileName));
+
+  @override
+  void dispose() {
+    _listName.dispose();
+    super.dispose();
+  }
+
   static int _initialMpnIndex(ExcelTable t) {
     final guess = t.guessMpnColumn();
     return guess >= 0 ? guess : 0;
@@ -46,26 +112,95 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
 
   Future<void> _import() async {
     setState(() => _importing = true);
+    final lists = ref.read(listsProvider.notifier);
+    final currentIsEmpty = ref.read(catalogProvider).isEmpty;
+    String? createdId;
     try {
+      if (_newList) {
+        createdId = await lists.create(_listName.text);
+      } else if (currentIsEmpty) {
+        // First import into an empty list: name it after the file.
+        lists.rename(ref.read(listsProvider).activeId, _listName.text);
+      }
       final result = await ref
           .read(catalogProvider.notifier)
-          .import(headers: _table.headers, rows: _table.rows, mpnIndex: _mpnIndex, mode: _mode);
+          .import(
+            headers: _table.headers,
+            rows: _table.rows,
+            mpnIndex: _mpnIndex,
+            mode: _newList || currentIsEmpty ? ImportMode.replace : _mode,
+          );
       HapticFeedback.mediumImpact();
       if (mounted) Navigator.of(context).pop(result);
     } catch (e) {
+      if (createdId != null) await lists.delete(createdId);
       if (!mounted) return;
       setState(() => _importing = false);
-      showCupertinoDialog<void>(
-        context: context,
-        builder: (context) => CupertinoAlertDialog(
-          title: const Text('Import Failed'),
-          content: Text('$e'),
-          actions: [
-            CupertinoDialogAction(isDefaultAction: true, onPressed: Navigator.of(context).pop, child: const Text('OK')),
-          ],
+      _alert(context, 'Import Failed', '$e');
+    }
+  }
+
+  Widget _destinationSection(bool hasData) {
+    final current = ref.watch(listsProvider).active;
+    final nameField = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: CupertinoTextField(
+        controller: _listName,
+        placeholder: 'List name',
+        prefix: Padding(
+          padding: const EdgeInsets.only(left: 10),
+          child: Icon(CupertinoIcons.list_bullet, size: 18, color: context.resolve(CupertinoColors.secondaryLabel)),
         ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      ),
+    );
+
+    if (!hasData) {
+      return Section(
+        header: 'List name',
+        footer: 'Each import can be its own list. Switch between lists to check different orders or BOMs.',
+        children: [nameField],
       );
     }
+
+    return Section(
+      header: 'Import to',
+      footer: _newList
+          ? 'Creates a new list. “${current.name}” stays as it is.'
+          : _mode == ImportMode.replace
+          ? 'Deletes everything in “${current.name}”, then uses the fields in this file.'
+          : 'Updates rows with the same MPN in “${current.name}”, adds new ones, and adds any new fields.',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: CupertinoSlidingSegmentedControl<bool>(
+            groupValue: _newList,
+            onValueChanged: (v) => setState(() => _newList = v!),
+            children: {
+              true: const Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('New List')),
+              false: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                child: Text(current.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            },
+          ),
+        ),
+        if (_newList)
+          nameField
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: CupertinoSlidingSegmentedControl<ImportMode>(
+              groupValue: _mode,
+              onValueChanged: (m) => setState(() => _mode = m!),
+              children: const {
+                ImportMode.replace: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Replace')),
+                ImportMode.merge: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Merge')),
+              },
+            ),
+          ),
+      ],
+    );
   }
 
   /// First non-empty value of a column, shown as a hint next to each field.
@@ -122,26 +257,7 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
                   ),
               ],
             ),
-          if (hasData)
-            Section(
-              header: 'EXISTING DATA',
-              footer: _mode == ImportMode.replace
-                  ? 'Deletes all components and fields, then uses the fields in this file.'
-                  : 'Updates components with the same MPN, adds new ones, and adds any new fields.',
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: CupertinoSlidingSegmentedControl<ImportMode>(
-                    groupValue: _mode,
-                    onValueChanged: (m) => setState(() => _mode = m!),
-                    children: const {
-                      ImportMode.replace: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Replace')),
-                      ImportMode.merge: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Merge')),
-                    },
-                  ),
-                ),
-              ],
-            ),
+          _destinationSection(hasData),
           Section(
             header: 'FIELDS',
             footer: detected
