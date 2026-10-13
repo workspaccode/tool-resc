@@ -6,10 +6,9 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../app/theme.dart';
 import '../../widgets/glass.dart';
-import 'label_parser.dart';
 
 /// Full-screen camera that reads the QR code (or DataMatrix) on a label and
-/// pops with the [ScannedLabel].
+/// pops with its raw text.
 class ScannerScreen extends StatefulWidget {
   const ScannerScreen({super.key});
 
@@ -36,7 +35,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     if (raw == null) return;
     _done = true;
     HapticFeedback.mediumImpact();
-    Navigator.of(context).pop(ScannedLabel.parse(raw));
+    Navigator.of(context).pop(raw);
   }
 
   /// The guide frame: a square slightly above center. Codes anywhere in view

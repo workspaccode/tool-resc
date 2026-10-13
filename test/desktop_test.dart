@@ -80,6 +80,19 @@ void main() {
     expect(find.text('Drawer B1'), findsOneWidget);
     expect(find.text('In This List'), findsOneWidget);
 
+    // A slow scanner's QR text lands in the search field; Enter still
+    // handles it as a scan.
+    const qr = '{pc:C141700,pm:RC0805FR-07820KL,qty:100}';
+    final field = tester.widget<CupertinoSearchTextField>(find.byType(CupertinoSearchTextField));
+    field.controller!.text = qr;
+    field.onSubmitted!(qr);
+    await settle();
+    expect(find.text('Drawer A3'), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(CupertinoSearchTextField), matching: find.text('RC0805FR-07820KL')),
+      findsOneWidget,
+    );
+
     // A second list: the title and sidebar follow the active list.
     await tester.runAsync(() async {
       await container.read(listsProvider.notifier).create('BOM F280033');

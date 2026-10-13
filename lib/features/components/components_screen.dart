@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/platform.dart';
+import '../../app/settings.dart';
 import '../../app/theme.dart';
 import '../../widgets/clickable_tile.dart';
 import '../../widgets/glass.dart';
@@ -66,27 +67,55 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
   }
 
   Future<void> _scanWithCamera() async {
-    final label = await Navigator.of(context)
-        .push<ScannedLabel>(CupertinoPageRoute(fullscreenDialog: true, builder: (_) => const ScannerScreen()));
-    if (label != null && mounted) await _handleLabel(label);
+    final raw = await Navigator.of(context)
+        .push<String>(CupertinoPageRoute(fullscreenDialog: true, builder: (_) => const ScannerScreen()));
+    if (raw != null && mounted) await _handleLabel(_readCode(raw));
   }
 
   void _onHardwareScan(String text) {
     setState(() => _lastScan = DateTime.now());
-    _handleLabel(ScannedLabel.parse(text));
+    _handleLabel(_readCode(text));
   }
 
-  /// Shows a scanned label: fills the search with the MPN as stored, and
-  /// opens it when it has a single row.
+  /// Turns a scanned code into a label, the way Settings says to read codes.
+  ScannedLabel _readCode(String raw) {
+    final prefs = ref.read(searchPrefsProvider);
+    return ScannedLabel.read(raw, reading: prefs.codeReading, field: prefs.codeField);
+  }
+
+  void _onTyping(String text) {
+    if (ref.read(searchPrefsProvider).searchWhileTyping) {
+      _setQuery(text);
+    } else {
+      ref.read(scannedLabelProvider.notifier).set(null);
+    }
+  }
+
+  /// A scan: searched right away, or (when "Search After Scan" is off) only
+  /// put in the search field to be searched with Enter.
   Future<void> _handleLabel(ScannedLabel label) async {
+    if (!ref.read(searchPrefsProvider).searchOnScan) {
+      _search.value = TextEditingValue(
+        text: label.mpn,
+        selection: TextSelection.collapsed(offset: label.mpn.length),
+      );
+      _searchFocus.requestFocus();
+      return;
+    }
+    await _showLabel(label);
+  }
+
+  /// Searches a scanned label: fills the search with the value as stored, and
+  /// opens it when it has a single row.
+  Future<void> _showLabel(ScannedLabel label) async {
     final repo = ref.read(componentsRepositoryProvider);
     final key = repo.matchKey(label.mpn);
     final rows = key == null ? const <Component>[] : await repo.rowsFor(key);
     if (!mounted) return;
 
-    final mpn = rows.firstOrNull?.mpn ?? label.mpn;
-    _search.text = mpn;
-    ref.read(searchQueryProvider.notifier).set(mpn);
+    final value = rows.firstOrNull?.mpn ?? label.mpn;
+    _search.text = value;
+    ref.read(searchQueryProvider.notifier).set(value);
     ref.read(scannedLabelProvider.notifier).set(label);
 
     if (rows.isEmpty) {
@@ -98,8 +127,14 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
     }
   }
 
-  /// Enter in the search field opens the part if the MPN matches exactly.
+  /// Enter in the search field always searches. A full label code (e.g. a QR
+  /// typed by a scanner too slow to be detected as one) is read as a scan;
+  /// otherwise the text is searched and an exact match opens.
   Future<void> _submit(String text) async {
+    final label = _readCode(text);
+    if (label.mpn != text.trim()) return _showLabel(label);
+
+    _setQuery(text);
     final rows = await ref.read(componentsRepositoryProvider).rowsFor(mpnKey(text));
     if (mounted && rows.isNotEmpty) _open(rows.first);
   }
@@ -311,6 +346,8 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
     final label = ref.watch(scannedLabelProvider);
     // Keep showing the previous results while the next search runs.
     final results = ref.watch(searchResultsProvider).value ?? SearchResults.empty;
+    // Name the search column as it appears in the imported file.
+    final placeholder = 'Search by ${catalog.mpnField ?? 'value'}';
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     return CupertinoPageScaffold(
@@ -329,12 +366,12 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
                   controller: _search,
                   focusNode: _searchFocus,
                   autofocus: isDesktop,
-                  placeholder: isDesktop ? 'Search by MPN  (${_shortcutLabel('F')})' : 'Search by MPN',
+                  placeholder: isDesktop ? '$placeholder  (${_shortcutLabel('F')})' : placeholder,
                   autocorrect: false,
                   smartDashesType: SmartDashesType.disabled,
                   smartQuotesType: SmartQuotesType.disabled,
                   enableIMEPersonalizedLearning: false,
-                  onChanged: _setQuery,
+                  onChanged: _onTyping,
                   onSubmitted: _submit,
                   onSuffixTap: _clearSearch,
                 ),
@@ -697,14 +734,14 @@ class _Hint extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             isDesktop
-                ? 'Type an MPN, or scan the label on a reel or bag with your USB scanner.'
-                : 'Search by MPN, or scan the QR code on a reel or bag label.',
+                ? 'Type to search, or scan a label with your USB scanner.'
+                : 'Type to search, or scan the code on a label with the camera.',
             textAlign: TextAlign.center,
             style: AppText.subheadline.copyWith(color: secondary),
           ),
           const SizedBox(height: 20),
           Text(
-            '${catalog.count} rows · ${catalog.mpnCount} MPNs · ${catalog.fields.length} fields',
+            '${catalog.count} rows · ${catalog.mpnCount} unique · ${catalog.fields.length} fields',
             style: AppText.footnote.copyWith(color: secondary, fontFeatures: const [FontFeature.tabularFigures()]),
           ),
         ],
@@ -730,7 +767,7 @@ class _NoResults extends StatelessWidget {
           Text('No Results for “$query”', style: AppText.title3, textAlign: TextAlign.center),
           const SizedBox(height: 6),
           Text(
-            'Check the spelling or try part of the MPN.',
+            'Check the spelling or try part of it.',
             textAlign: TextAlign.center,
             style: AppText.subheadline.copyWith(color: context.resolve(CupertinoColors.secondaryLabel)),
           ),

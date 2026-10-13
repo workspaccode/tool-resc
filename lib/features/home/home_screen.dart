@@ -39,7 +39,7 @@ class Tool {
 final tools = <Tool>[
   Tool(
     title: 'Components',
-    subtitle: 'Search by MPN or scan a label',
+    subtitle: 'Search or scan a label to find a part',
     icon: CupertinoIcons.cube_box_fill,
     color: CupertinoColors.systemBlue,
     builder: (_) => const ComponentsScreen(),

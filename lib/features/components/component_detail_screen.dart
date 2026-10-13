@@ -60,7 +60,7 @@ class ComponentDetailScreen extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(mpnField ?? 'MPN', style: AppText.footnote.copyWith(color: secondary)),
+                              Text(mpnField ?? 'Search column', style: AppText.footnote.copyWith(color: secondary)),
                               const SizedBox(height: 2),
                               Text(
                                 component.mpn,

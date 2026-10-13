@@ -45,7 +45,7 @@ Future<ImportResult?> pickAndImportExcel(BuildContext context, {ValueChanged<boo
         '${result.inserted} rows added',
         if (result.updated > 0) '${result.updated} rows updated',
         if (result.removed > 0) '${result.removed} old rows removed',
-        if (result.skipped > 0) '${result.skipped} rows skipped (empty MPN)',
+        if (result.skipped > 0) '${result.skipped} rows skipped (empty search column)',
       ].join('\n'),
     );
   }
@@ -169,7 +169,7 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
           ? 'Creates a new list. “${current.name}” stays as it is.'
           : _mode == ImportMode.replace
           ? 'Deletes everything in “${current.name}”, then uses the fields in this file.'
-          : 'Updates rows with the same MPN in “${current.name}”, adds new ones, and adds any new fields.',
+          : 'Updates rows in “${current.name}” with the same value in the search column, adds new ones, and adds any new fields.',
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
@@ -261,14 +261,14 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
           Section(
             header: 'FIELDS',
             footer: detected
-                ? 'Each column becomes a field. The MPN column was detected automatically. Tap another field to change it.'
-                : 'Each column becomes a field. No MPN column was found. Tap the field that holds the part number.',
+                ? 'Each column becomes a field. The marked column is what searches and scans match against. It was picked automatically; tap another column to change it.'
+                : 'Each column becomes a field. Tap the column that searches and scans should match against (for example, the part number).',
             children: [
               for (var i = 0; i < _table.headers.length; i++)
                 _CheckRow(
                   title: _table.headers[i],
                   info: _sample(i),
-                  badge: i == _mpnIndex ? 'MPN' : null,
+                  badge: i == _mpnIndex ? 'SEARCH' : null,
                   selected: i == _mpnIndex,
                   onTap: () {
                     HapticFeedback.selectionClick();
@@ -311,17 +311,17 @@ class _MpnStats extends StatelessWidget {
     return Section(
       header: 'Will be saved',
       footer: [
-        if (empty > 0) 'Rows with an empty MPN can’t be searched or scanned, so they are skipped.',
+        if (empty > 0) 'Rows with an empty search column can’t be found, so they are skipped.',
         if (unique > 0 && unique * 2 < saved)
-          'Many rows share the same MPN. Each row is still saved. If this is unexpected, check the MPN column.',
+          'Many rows share the same value. Each row is still saved. If this is unexpected, check the search column.',
       ].join(' ').nullIfEmpty,
       children: [
         CupertinoListTile(title: const Text('Rows'), additionalInfo: Text('$saved')),
-        CupertinoListTile(title: const Text('Different MPNs'), additionalInfo: Text('$unique')),
+        CupertinoListTile(title: const Text('Different values'), additionalInfo: Text('$unique')),
         if (empty > 0)
           CupertinoListTile(
             leading: Icon(CupertinoIcons.exclamationmark_triangle_fill, color: warn, size: 22),
-            title: const Text('Skipped (empty MPN)'),
+            title: const Text('Skipped (empty)'),
             additionalInfo: Text('$empty', style: TextStyle(color: warn)),
           ),
       ],

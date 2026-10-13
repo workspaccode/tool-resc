@@ -1,3 +1,5 @@
+import '../../app/settings.dart';
+
 /// Extracts part information from the code on a component label, read by
 /// the camera or a USB scanner:
 /// - LCSC QR: `{pbn:...,on:WM2609230751,pc:C141700,pm:RC0805FR-07820KL,qty:100,...}`
@@ -17,6 +19,42 @@ class ScannedLabel {
   static ScannedLabel parse(String raw) {
     final text = raw.trim();
     return _parseLcsc(text) ?? _parseEcia(text) ?? ScannedLabel(raw: raw, mpn: text);
+  }
+
+  /// Reads a code the way the user chose in Settings. When [field] isn't in
+  /// the code, the whole code is used.
+  static ScannedLabel read(String raw, {required CodeReading reading, required String field}) {
+    final text = raw.trim();
+    switch (reading) {
+      case CodeReading.auto:
+        return parse(raw);
+      case CodeReading.whole:
+        return ScannedLabel(raw: raw, mpn: text);
+      case CodeReading.field:
+        final value = valueOf(text, field);
+        // Keep any extras a known format provides (supplier code, quantity).
+        final known = _parseLcsc(text) ?? _parseEcia(text);
+        return ScannedLabel(
+          raw: raw,
+          mpn: value ?? text,
+          supplierPart: known?.supplierPart,
+          quantity: known?.quantity,
+          orderNumber: known?.orderNumber,
+        );
+    }
+  }
+
+  /// The value of `field` in codes like `{pm:ABC,qty:5}`, `PN=ABC;LOT=7` or
+  /// one `key: value` per line. Case-insensitive; null if absent.
+  static String? valueOf(String code, String field) {
+    final key = field.trim();
+    if (key.isEmpty) return null;
+    final match = RegExp(
+      '(?:^|[^A-Za-z0-9_])${RegExp.escape(key)}\\s*[:=]\\s*([^,;|}\\]\\r\\n\\t\u001d\u001e]+)',
+      caseSensitive: false,
+    ).firstMatch(code);
+    final value = match?.group(1)?.trim();
+    return value == null || value.isEmpty ? null : value;
   }
 
   static ScannedLabel? _parseLcsc(String text) {
