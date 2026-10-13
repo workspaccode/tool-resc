@@ -9,6 +9,7 @@ import '../../widgets/section.dart';
 import '../../widgets/adaptive_sheet.dart';
 import '../../widgets/icon_tile.dart';
 import '../../widgets/prompt.dart';
+import 'storage_section.dart';
 
 void showSettingsSheet(BuildContext context) {
   showAdaptiveSheet<void>(context, builder: (context, controller) => _SettingsSheet(scrollController: controller));
@@ -150,10 +151,15 @@ class _SettingsSheet extends ConsumerWidget {
                 ),
             ],
           ),
+          const StorageSection(),
           Section(
             header: 'ABOUT',
             footer: 'All data is stored only on this device and is not included in backups.',
-            children: const [CupertinoListTile(title: Text('Version'), additionalInfo: Text('1.0.0'))],
+            children: const [
+              CupertinoListTile(title: Text('Version'), additionalInfo: Text('1.2.0')),
+              CupertinoListTile(title: Text('Created by'), additionalInfo: Text('Mahmoud Hafez Eltarqi')),
+              CupertinoListTile(title: Text('Powered by'), additionalInfo: Text('RESC')),
+            ],
           ),
         ],
       ),

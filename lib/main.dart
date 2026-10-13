@@ -26,7 +26,7 @@ class ToolRescApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final appearance = ref.watch(appearanceProvider);
     return CupertinoApp(
-      title: 'Tool Resc',
+      title: 'ToolsResc',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(appearance.brightness),
       // Material localizations back the text selection toolbar on Android.
