@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -31,16 +33,22 @@ class ScanBurstDetector {
     _last = time;
   }
 
+  /// Whether the keys so far are clearly a scanner (enough of them, fast).
+  bool get inBurst => _keys >= minLength && (_last! - _first!) ~/ (_keys - 1) <= maxAverageGap;
+
   /// Called on Enter/Tab. Returns the scanned text if the burst was a scan.
   String? finish(Duration time) {
-    final text = _buffer.toString();
-    final keys = _keys;
-    final span = (_last ?? time) - (_first ?? time);
-    final recent = _last != null && time - _last! <= resetGap;
+    if (_last != null && time - _last! <= resetGap) return flush();
     _reset(null);
-    if (!recent || keys < minLength) return null;
-    final averageGap = span ~/ (keys - 1);
-    return averageGap <= maxAverageGap ? text : null;
+    return null;
+  }
+
+  /// Ends the current burst without Enter (for scanners that send no
+  /// suffix). Returns the scanned text if it was a scan.
+  String? flush() {
+    final text = inBurst ? _buffer.toString() : null;
+    _reset(null);
+    return text;
   }
 
   void _reset(Duration? time) {
@@ -66,6 +74,10 @@ String? usLayoutChar(PhysicalKeyboardKey key, {required bool shift}) {
     const plain = '1234567890', shifted = '!@#\$%^&*()';
     return (shift ? shifted : plain)[code - 0x1E];
   }
+  // Numeric keypad, which some scanners use for digits.
+  if (code >= 0x59 && code <= 0x62) return '1234567890'[code - 0x59];
+  const keypad = {0x54: '/', 0x55: '*', 0x56: '-', 0x57: '+', 0x63: '.'};
+  if (keypad[code] case final c?) return c;
   const symbols = {
     0x2C: (' ', ' '),
     0x2D: ('-', '_'),
@@ -85,7 +97,9 @@ String? usLayoutChar(PhysicalKeyboardKey key, {required bool shift}) {
 }
 
 /// Listens for scanner bursts anywhere while [enabled], and reports each
-/// scanned text to [onScan]. Normal typing passes through untouched.
+/// scanned text to [onScan]. Normal typing passes through untouched; once
+/// input is clearly a scanner, its keys are kept out of any focused text
+/// field so a half-typed code doesn't mix with what's there.
 class KeyboardScannerListener extends StatefulWidget {
   const KeyboardScannerListener({super.key, required this.onScan, required this.child, this.enabled = true});
 
@@ -100,6 +114,10 @@ class KeyboardScannerListener extends StatefulWidget {
 class _KeyboardScannerListenerState extends State<KeyboardScannerListener> {
   final _detector = ScanBurstDetector();
 
+  /// Fires when a burst stops without Enter (scanner with no suffix).
+  Timer? _idle;
+  static const _idleDelay = Duration(milliseconds: 150);
+
   @override
   void initState() {
     super.initState();
@@ -109,6 +127,7 @@ class _KeyboardScannerListenerState extends State<KeyboardScannerListener> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
+    _idle?.cancel();
     super.dispose();
   }
 
@@ -119,6 +138,7 @@ class _KeyboardScannerListenerState extends State<KeyboardScannerListener> {
 
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter || key == LogicalKeyboardKey.tab) {
+      _idle?.cancel();
       final text = _detector.finish(event.timeStamp);
       if (text == null) return false;
       widget.onScan(text);
@@ -126,8 +146,16 @@ class _KeyboardScannerListenerState extends State<KeyboardScannerListener> {
     }
 
     final char = usLayoutChar(event.physicalKey, shift: HardwareKeyboard.instance.isShiftPressed);
-    if (char != null) _detector.addChar(char, event.timeStamp);
-    return false;
+    if (char == null) return false;
+    _detector.addChar(char, event.timeStamp);
+    _idle?.cancel();
+    _idle = Timer(_idleDelay, () {
+      if (!mounted) return;
+      final text = _detector.flush();
+      if (text != null) widget.onScan(text);
+    });
+    // Once it's clearly a scanner, keep its keys out of the text field.
+    return _detector.inBurst;
   }
 
   @override

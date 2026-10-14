@@ -348,6 +348,19 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
     final results = ref.watch(searchResultsProvider).value ?? SearchResults.empty;
     // Name the search column as it appears in the imported file.
     final placeholder = 'Search by ${catalog.mpnField ?? 'value'}';
+    final searchField = CupertinoSearchTextField(
+      controller: _search,
+      focusNode: _searchFocus,
+      autofocus: isDesktop,
+      placeholder: isDesktop ? '$placeholder  (${_shortcutLabel('F')})' : placeholder,
+      autocorrect: false,
+      smartDashesType: SmartDashesType.disabled,
+      smartQuotesType: SmartQuotesType.disabled,
+      enableIMEPersonalizedLearning: false,
+      onChanged: _onTyping,
+      onSubmitted: _submit,
+      onSuffixTap: _clearSearch,
+    );
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     return CupertinoPageScaffold(
@@ -356,26 +369,26 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
           CustomScrollView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             slivers: [
-              CupertinoSliverNavigationBar.search(
-                // Keyed by list: the bar doesn't refresh its title otherwise.
-                key: ValueKey(ref.watch(listsProvider).activeId),
-                largeTitle: Text(ref.watch(listsProvider).active.name),
-                previousPageTitle: 'Tools',
-                trailing: _actions(true),
-                searchField: CupertinoSearchTextField(
-                  controller: _search,
-                  focusNode: _searchFocus,
-                  autofocus: isDesktop,
-                  placeholder: isDesktop ? '$placeholder  (${_shortcutLabel('F')})' : placeholder,
-                  autocorrect: false,
-                  smartDashesType: SmartDashesType.disabled,
-                  smartQuotesType: SmartQuotesType.disabled,
-                  enableIMEPersonalizedLearning: false,
-                  onChanged: _onTyping,
-                  onSubmitted: _submit,
-                  onSuffixTap: _clearSearch,
+              // Phones: iOS search bar under the large title. Desktop: a plain
+              // field that's always there; the iOS "search mode" rebuilds the
+              // field on click, which loses focus and drops scanner input.
+              if (isDesktop) ...[
+                CupertinoSliverNavigationBar(
+                  // Keyed by list: the bar doesn't refresh its title otherwise.
+                  key: ValueKey(ref.watch(listsProvider).activeId),
+                  largeTitle: Text(ref.watch(listsProvider).active.name),
+                  previousPageTitle: 'Tools',
+                  trailing: _actions(true),
                 ),
-              ),
+                SliverPersistentHeader(pinned: true, delegate: _PinnedSearch(child: searchField)),
+              ] else
+                CupertinoSliverNavigationBar.search(
+                  key: ValueKey(ref.watch(listsProvider).activeId),
+                  largeTitle: Text(ref.watch(listsProvider).active.name),
+                  previousPageTitle: 'Tools',
+                  trailing: _actions(true),
+                  searchField: searchField,
+                ),
               if (_narrow(context)) SliverToBoxAdapter(child: ComponentListChips(onImport: _pickExcel)),
               if (label != null) SliverToBoxAdapter(child: _scanCard(label, query)),
               if (query.trim().isEmpty)
@@ -418,6 +431,32 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
       ),
     );
   }
+}
+
+/// The desktop search field, pinned under the navigation bar.
+class _PinnedSearch extends SliverPersistentHeaderDelegate {
+  const _PinnedSearch({required this.child});
+
+  final Widget child;
+
+  static const _height = 52.0;
+
+  @override
+  double get minExtent => _height;
+
+  @override
+  double get maxExtent => _height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return ColoredBox(
+      color: context.resolve(CupertinoColors.systemGroupedBackground),
+      child: Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 12), child: child),
+    );
+  }
+
+  @override
+  bool shouldRebuild(_PinnedSearch old) => old.child != child;
 }
 
 String _shortcutLabel(String key) => isMacOS ? '⌘$key' : 'Ctrl+$key';

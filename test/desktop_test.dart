@@ -80,6 +80,59 @@ void main() {
     expect(find.text('Drawer B1'), findsOneWidget);
     expect(find.text('In This List'), findsOneWidget);
 
+    // Click into the search field first, then scan: the field keeps focus
+    // and ends up with the scanned value, and the part opens.
+    Future<void> scanKeys(List<PhysicalKeyboardKey> keys, {bool enter = true}) async {
+      for (final key in keys) {
+        await simulateKeyDownEvent(LogicalKeyboardKey.keyA, physicalKey: key);
+        await simulateKeyUpEvent(LogicalKeyboardKey.keyA, physicalKey: key);
+      }
+      if (enter) {
+        await simulateKeyDownEvent(LogicalKeyboardKey.enter);
+        await simulateKeyUpEvent(LogicalKeyboardKey.enter);
+      }
+    }
+
+    await tester.tap(find.byType(CupertinoSearchTextField));
+    await settle();
+    final searchFocus = tester.widget<EditableText>(find.byType(EditableText)).focusNode;
+    expect(searchFocus.hasFocus, isTrue);
+    await scanKeys([
+      PhysicalKeyboardKey.keyR,
+      PhysicalKeyboardKey.keyC,
+      PhysicalKeyboardKey.digit0,
+      PhysicalKeyboardKey.digit8,
+      PhysicalKeyboardKey.digit0,
+      PhysicalKeyboardKey.digit5,
+      PhysicalKeyboardKey.keyF,
+      PhysicalKeyboardKey.keyR,
+      PhysicalKeyboardKey.minus,
+      PhysicalKeyboardKey.digit0,
+      PhysicalKeyboardKey.digit7,
+      PhysicalKeyboardKey.digit8,
+      PhysicalKeyboardKey.digit2,
+      PhysicalKeyboardKey.digit0,
+      PhysicalKeyboardKey.keyK,
+      PhysicalKeyboardKey.keyL,
+    ]);
+    await settle();
+    expect(searchFocus.hasFocus, isTrue);
+    expect(tester.widget<EditableText>(find.byType(EditableText)).controller.text, 'RC0805FR-07820KL');
+    expect(find.text('Drawer A3'), findsOneWidget);
+
+    // A scanner that sends no Enter: the scan is taken after a short pause.
+    await scanKeys([
+      PhysicalKeyboardKey.keyL,
+      PhysicalKeyboardKey.keyM,
+      PhysicalKeyboardKey.digit3,
+      PhysicalKeyboardKey.digit5,
+      PhysicalKeyboardKey.digit8,
+      PhysicalKeyboardKey.keyD,
+      PhysicalKeyboardKey.keyR,
+    ], enter: false);
+    await settle();
+    expect(find.text('Drawer B1'), findsOneWidget);
+
     // A slow scanner's QR text lands in the search field; Enter still
     // handles it as a scan.
     const qr = '{pc:C141700,pm:RC0805FR-07820KL,qty:100}';

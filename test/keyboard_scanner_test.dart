@@ -49,6 +49,27 @@ void main() {
     });
   });
 
+  group('ScanBurstDetector without Enter', () {
+    test('a fast burst is recognized mid-way and can be flushed', () {
+      final d = ScanBurstDetector();
+      d.addChar('a', ms(0));
+      d.addChar('b', ms(5));
+      d.addChar('c', ms(10));
+      expect(d.inBurst, isFalse); // too short to tell yet
+      d.addChar('d', ms(15));
+      expect(d.inBurst, isTrue);
+      expect(d.flush(), 'abcd');
+      expect(d.flush(), isNull); // already taken
+    });
+
+    test('typing is never a burst', () {
+      final d = ScanBurstDetector();
+      type(d, 'abcdef', gap: 120);
+      expect(d.inBurst, isFalse);
+      expect(d.flush(), isNull);
+    });
+  });
+
   group('usLayoutChar', () {
     test('decodes by physical key, independent of the OS layout', () {
       // On an Arabic layout these keys type Arabic letters; scanners mean US.
@@ -59,6 +80,9 @@ void main() {
       expect(usLayoutChar(PhysicalKeyboardKey.semicolon, shift: true), ':');
       expect(usLayoutChar(PhysicalKeyboardKey.bracketLeft, shift: true), '{');
       expect(usLayoutChar(PhysicalKeyboardKey.comma, shift: false), ',');
+      expect(usLayoutChar(PhysicalKeyboardKey.numpad7, shift: false), '7');
+      expect(usLayoutChar(PhysicalKeyboardKey.numpad0, shift: false), '0');
+      expect(usLayoutChar(PhysicalKeyboardKey.numpadSubtract, shift: false), '-');
     });
 
     test('ignores non-character keys', () {
