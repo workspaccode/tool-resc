@@ -9,6 +9,8 @@ import '../../widgets/section.dart';
 import '../../widgets/adaptive_sheet.dart';
 import '../../widgets/icon_tile.dart';
 import '../../widgets/prompt.dart';
+import '../sync/sync_prefs.dart';
+import '../sync/sync_section.dart';
 import 'storage_section.dart';
 
 void showSettingsSheet(BuildContext context) {
@@ -151,10 +153,14 @@ class _SettingsSheet extends ConsumerWidget {
                 ),
             ],
           ),
+          const SyncSection(),
           const StorageSection(),
           Section(
             header: 'ABOUT',
-            footer: 'All data is stored only on this device and is not included in backups.',
+            footer: ref.watch(syncPrefsProvider.select((p) => p.enabled))
+                ? 'Data is stored on this device and is not included in backups. With Server Sync on, lists '
+                      'and scans are also sent to your server.'
+                : 'All data is stored only on this device and is not included in backups.',
             children: const [
               CupertinoListTile(title: Text('Version'), additionalInfo: Text('1.2.0')),
               CupertinoListTile(title: Text('Created by'), additionalInfo: Text('Mahmoud Hafez Eltarqi')),

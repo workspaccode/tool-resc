@@ -14,10 +14,13 @@ import '../../widgets/icon_tile.dart';
 import '../../widgets/section.dart';
 import '../components/component_lists.dart';
 import '../components/components_providers.dart';
+import '../sync/sync_controller.dart';
+import '../sync/sync_prefs.dart';
 
 /// Every open Hive box: settings plus each list's two boxes.
 List<BoxBase<dynamic>> _boxes(ProviderContainer app) => [
   Hive.box<Object>(Boxes.settings),
+  Hive.box<Map>(Boxes.syncQueue),
   for (final l in app.read(listsProvider).lists) ...[
     Hive.box<Object>(Boxes.componentsMeta(l.id)),
     Hive.lazyBox<Map>(Boxes.components(l.id)),
@@ -77,6 +80,9 @@ Future<void> deleteAllData(ProviderContainer app) async {
   app.invalidate(listRepositoryProvider(startId));
   app.invalidate(appearanceProvider);
   app.invalidate(searchPrefsProvider);
+  await Hive.box<Map>(Boxes.syncQueue).clear();
+  app.invalidate(syncPrefsProvider); // sync off, new device id
+  app.invalidate(syncProvider);
   app.read(searchQueryProvider.notifier).set('');
   app.read(scannedLabelProvider.notifier).set(null);
 

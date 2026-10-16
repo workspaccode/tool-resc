@@ -1,3 +1,5 @@
 {
-    "cmake.sourceDirectory": "/Volumes/XBRYMO/TOOLS/scan/tool-resc/windows"
+    "cmake.sourceDirectory": "/Volumes/XBRYMO/TOOLS/scan/tool-resc/windows",
+    "gradle.autoDetect": "off",
+    "java.gradle.buildServer.enabled": "off"
 }

@@ -211,6 +211,22 @@ class ComponentsRepository {
     return SearchResults(items: items, total: rowKeys.length);
   }
 
+  /// Every row as one table (headers = fields, in import order), e.g. to
+  /// upload the list. Null when the list is empty.
+  Future<({List<String> headers, List<List<String>> rows, int mpnIndex})?> exportTable() async {
+    final fields = this.fields;
+    final mpnIndex = fields.indexOf(mpnField ?? '');
+    if (count == 0 || mpnIndex < 0) return null;
+    final rows = <List<String>>[];
+    for (final keys in _index.values) {
+      for (final key in [...keys]..sort(_bySeq)) {
+        final values = await _get(key);
+        rows.add([for (final f in fields) values[f] ?? '']);
+      }
+    }
+    return (headers: fields, rows: rows, mpnIndex: mpnIndex);
+  }
+
   Future<void> clear() async {
     _invalidate();
     await _items.clear();

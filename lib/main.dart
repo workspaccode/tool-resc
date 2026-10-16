@@ -7,6 +7,7 @@ import 'app/settings.dart';
 import 'app/storage.dart';
 import 'app/theme.dart';
 import 'features/home/home_screen.dart';
+import 'features/sync/sync_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,6 +26,8 @@ class ToolRescApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final appearance = ref.watch(appearanceProvider);
+    // Keeps optional server sync alive, so queued items send after launch.
+    ref.listen(syncProvider, (_, _) {});
     return CupertinoApp(
       title: 'ToolsResc',
       debugShowCheckedModeBanner: false,

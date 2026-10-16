@@ -21,6 +21,10 @@ abstract final class Boxes {
   static String components(String listId) => listId == defaultListId ? 'components' : 'components_$listId';
 
   static const defaultListId = 'default';
+
+  /// Optional server sync: imports and scans waiting to be sent, keyed by
+  /// an auto-increment int so they're sent in order.
+  static const syncQueue = 'sync_queue';
 }
 
 /// Keys in the settings box for the list registry.
@@ -42,6 +46,7 @@ Future<void> initStorage({String? path}) async {
     await Hive.initFlutter();
   }
   final settings = await Hive.openBox<Object>(Boxes.settings);
+  await Hive.openBox<Map>(Boxes.syncQueue);
   if (settings.get(ListKeys.lists) == null) {
     await settings.put(ListKeys.lists, [
       {'id': Boxes.defaultListId, 'name': 'Main List'},

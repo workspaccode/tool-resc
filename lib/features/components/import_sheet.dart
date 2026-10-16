@@ -12,6 +12,7 @@ import 'component_lists.dart';
 import 'components_providers.dart';
 import 'components_repository.dart';
 import 'excel_reader.dart';
+import '../sync/sync_controller.dart';
 
 /// Picks an .xlsx file, shows the import sheet, and reports the result.
 /// [onReading] is told while the file is being read (for a spinner).
@@ -122,13 +123,18 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
         // First import into an empty list: name it after the file.
         lists.rename(ref.read(listsProvider).activeId, _listName.text);
       }
+      final mode = _newList || currentIsEmpty ? ImportMode.replace : _mode;
       final result = await ref
           .read(catalogProvider.notifier)
-          .import(
+          .import(headers: _table.headers, rows: _table.rows, mpnIndex: _mpnIndex, mode: mode);
+      ref
+          .read(syncProvider.notifier)
+          .recordImport(
+            list: ref.read(listsProvider).active,
             headers: _table.headers,
             rows: _table.rows,
             mpnIndex: _mpnIndex,
-            mode: _newList || currentIsEmpty ? ImportMode.replace : _mode,
+            mode: mode,
           );
       HapticFeedback.mediumImpact();
       if (mounted) Navigator.of(context).pop(result);

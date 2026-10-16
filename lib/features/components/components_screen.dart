@@ -18,6 +18,7 @@ import 'import_sheet.dart';
 import 'keyboard_scanner.dart';
 import 'label_parser.dart';
 import 'scanner_screen.dart';
+import '../sync/sync_controller.dart';
 
 /// Components tool: search the imported parts by MPN, typed or scanned.
 ///
@@ -69,12 +70,29 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
   Future<void> _scanWithCamera() async {
     final raw = await Navigator.of(context)
         .push<String>(CupertinoPageRoute(fullscreenDialog: true, builder: (_) => const ScannerScreen()));
-    if (raw != null && mounted) await _handleLabel(_readCode(raw));
+    if (raw == null || !mounted) return;
+    final label = _readCode(raw);
+    _recordScan(label, ScanSource.camera);
+    await _handleLabel(label);
   }
 
   void _onHardwareScan(String text) {
     setState(() => _lastScan = DateTime.now());
-    _handleLabel(_readCode(text));
+    final label = _readCode(text);
+    _recordScan(label, ScanSource.scanner);
+    _handleLabel(label);
+  }
+
+  /// Sends the scan to the server when Server Sync is on.
+  void _recordScan(ScannedLabel label, ScanSource source) {
+    ref
+        .read(syncProvider.notifier)
+        .recordScan(
+          label,
+          list: ref.read(listsProvider).active,
+          source: source,
+          found: ref.read(componentsRepositoryProvider).matchKey(label.mpn) != null,
+        );
   }
 
   /// Turns a scanned code into a label, the way Settings says to read codes.
@@ -132,7 +150,10 @@ class _ComponentsScreenState extends ConsumerState<ComponentsScreen> {
   /// otherwise the text is searched and an exact match opens.
   Future<void> _submit(String text) async {
     final label = _readCode(text);
-    if (label.mpn != text.trim()) return _showLabel(label);
+    if (label.mpn != text.trim()) {
+      _recordScan(label, ScanSource.typed);
+      return _showLabel(label);
+    }
 
     _setQuery(text);
     final rows = await ref.read(componentsRepositoryProvider).rowsFor(mpnKey(text));
