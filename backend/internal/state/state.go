@@ -10,7 +10,7 @@ import (
 	"toolsresc/backend/internal/domain"
 )
 
-// Tally is a running scan count, kept per project and per part so lists
+// Tally is a running scan count, kept per list and per part so screens
 // don't need to walk every scan.
 type Tally struct {
 	Scans    int       `json:"scans"`
@@ -35,14 +35,16 @@ type State struct {
 	// Seq is the sequence number of the last applied event.
 	Seq uint64
 
+	Devices  map[string]*domain.Device
 	Projects map[string]*domain.Project
+	ByCode   map[string]string // project code -> project id
 
-	// Scans in the order they were received.
-	Scans []domain.Scan
+	// Scans per project, in the order they were received.
+	Scans map[string][]domain.Scan
 
-	// ProjectTally and PartTally are projections of Scans.
-	ProjectTally map[string]*Tally            // project id -> tally
-	PartTally    map[string]map[string]*Tally // project id -> mpn key -> tally
+	// Projections of Scans.
+	ListTally map[string]*Tally            // list id -> tally
+	PartTally map[string]map[string]*Tally // list id -> mpn key -> tally
 
 	// seen holds the ids of applied events, so a retried request is a no-op.
 	seen map[string]struct{}
@@ -50,10 +52,13 @@ type State struct {
 
 func New() *State {
 	return &State{
-		Projects:     map[string]*domain.Project{},
-		ProjectTally: map[string]*Tally{},
-		PartTally:    map[string]map[string]*Tally{},
-		seen:         map[string]struct{}{},
+		Devices:   map[string]*domain.Device{},
+		Projects:  map[string]*domain.Project{},
+		ByCode:    map[string]string{},
+		Scans:     map[string][]domain.Scan{},
+		ListTally: map[string]*Tally{},
+		PartTally: map[string]map[string]*Tally{},
+		seen:      map[string]struct{}{},
 	}
 }
 
@@ -63,30 +68,33 @@ func (s *State) Seen(id string) bool {
 	return ok
 }
 
-// project returns a project, creating it if needed, and keeps its name current.
-func (s *State) project(id, name string, at time.Time) *domain.Project {
-	p, ok := s.Projects[id]
-	if !ok {
-		p = domain.NewProject(id, name, at)
-		s.Projects[id] = p
-		return p
+// ProjectFor returns a project only if the device is a member.
+func (s *State) ProjectFor(projectID, deviceID string) (*domain.Project, bool) {
+	p, ok := s.Projects[projectID]
+	if !ok || !p.IsMember(deviceID) {
+		return nil, false
 	}
-	p.Rename(name, at)
-	return p
+	return p, true
+}
+
+func (s *State) touchDevice(id string, at time.Time) {
+	if d, ok := s.Devices[id]; ok && at.After(d.LastSeen) {
+		d.LastSeen = at
+	}
 }
 
 func (s *State) tallyScan(sc domain.Scan) {
-	pt, ok := s.ProjectTally[sc.ProjectID]
+	lt, ok := s.ListTally[sc.ListID]
 	if !ok {
-		pt = &Tally{}
-		s.ProjectTally[sc.ProjectID] = pt
+		lt = &Tally{}
+		s.ListTally[sc.ListID] = lt
 	}
-	pt.add(sc)
+	lt.add(sc)
 
-	parts, ok := s.PartTally[sc.ProjectID]
+	parts, ok := s.PartTally[sc.ListID]
 	if !ok {
 		parts = map[string]*Tally{}
-		s.PartTally[sc.ProjectID] = parts
+		s.PartTally[sc.ListID] = parts
 	}
 	t, ok := parts[sc.MPNKey]
 	if !ok {

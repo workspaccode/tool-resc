@@ -7,6 +7,8 @@ import '../../widgets/hud.dart';
 import '../../widgets/icon_tile.dart';
 import '../../widgets/prompt.dart';
 import '../../widgets/section.dart';
+import 'projects_controller.dart';
+import 'projects_screen.dart';
 import 'sync_controller.dart';
 import 'sync_prefs.dart';
 
@@ -45,11 +47,6 @@ class _SyncSectionState extends ConsumerState<SyncSection> {
       if (server.isEmpty || !mounted) return;
     }
     _prefs.update((p) => p.copyWith(enabled: true, serverUrl: server));
-    // The server needs the lists to check and count scans against them.
-    await _run(() async {
-      final n = await _sync.uploadAllLists();
-      return n == 0 ? 'Sync On' : 'Sending $n ${n == 1 ? 'list' : 'lists'}';
-    });
   }
 
   Future<void> _editServer() async {
@@ -81,13 +78,8 @@ class _SyncSectionState extends ConsumerState<SyncSection> {
 
   Future<void> _testConnection() => _run(() async {
     await _sync.testConnection();
-    await _sync.flush();
+    await _sync.syncNow();
     return 'Connected';
-  });
-
-  Future<void> _uploadLists() => _run(() async {
-    final n = await _sync.uploadAllLists();
-    return n == 0 ? 'No Lists to Send' : 'Sending $n ${n == 1 ? 'list' : 'lists'}';
   });
 
   /// Runs an action with a spinner, then shows its message or the error.
@@ -123,10 +115,11 @@ class _SyncSectionState extends ConsumerState<SyncSection> {
     return Section(
       header: 'Server Sync',
       footer: prefs.enabled
-          ? 'Imported lists and every scan are sent to your server, where scans are counted by part, list '
-                'and device. Offline, they wait on this device and are sent when the server can be reached.'
-          : 'Optional. Turn on to send lists and scans to your ToolsResc server and count scans by part, '
-                'list and device. When off, nothing leaves this device.',
+          ? 'No account needed: this device is recognized automatically. Create a project or join one with '
+                'its code; its lists sync to every device in it, and scans in them are counted. Lists outside '
+                'a project stay on this device. Offline, changes wait and are sent later.'
+          : 'Optional. Turn on to share lists with other phones and computers through projects, and see '
+                'what was scanned. When off, nothing leaves this device.',
       children: [
         CupertinoListTile(
           leading: const IconTile(icon: CupertinoIcons.cloud_upload_fill, color: CupertinoColors.systemTeal),
@@ -135,6 +128,15 @@ class _SyncSectionState extends ConsumerState<SyncSection> {
           onTap: _busy ? null : () => _toggle(!prefs.enabled),
         ),
         if (prefs.enabled) ...[
+          CupertinoListTile(
+            leading: const IconTile(icon: CupertinoIcons.square_stack_3d_up_fill, color: CupertinoColors.systemPurple),
+            title: const Text('Projects'),
+            additionalInfo: Text('${ref.watch(projectsProvider).length}'),
+            trailing: const CupertinoListTileChevron(),
+            onTap: prefs.isReady
+                ? () => Navigator.of(context).push(CupertinoPageRoute<void>(builder: (_) => const ProjectsScreen()))
+                : null,
+          ),
           CupertinoListTile(
             leading: const IconTile(icon: CupertinoIcons.globe, color: CupertinoColors.systemBlue),
             title: const Text('Server'),
@@ -172,11 +174,6 @@ class _SyncSectionState extends ConsumerState<SyncSection> {
             leading: const IconTile(icon: CupertinoIcons.arrow_2_circlepath, color: CupertinoColors.systemBlue),
             title: Text('Test Connection & Sync Now', style: TextStyle(color: blue)),
             onTap: _busy ? null : _testConnection,
-          ),
-          CupertinoListTile(
-            leading: const IconTile(icon: CupertinoIcons.tray_arrow_up_fill, color: CupertinoColors.systemBlue),
-            title: Text('Send All Lists Again', style: TextStyle(color: blue)),
-            onTap: _busy ? null : _uploadLists,
           ),
         ],
       ],

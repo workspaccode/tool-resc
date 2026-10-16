@@ -9,13 +9,15 @@ import (
 
 // Services are the use cases the API exposes.
 type Services struct {
+	Devices  *usecase.Devices
 	Projects *usecase.Projects
+	Lists    *usecase.Lists
 	Scans    *usecase.Scans
 	Stats    *usecase.Stats
 }
 
 type Options struct {
-	// APIKey protects /v1; empty means open.
+	// APIKey protects /v1 as a whole (optional, e.g. for a public server).
 	APIKey string
 	// MaxBodyBytes limits request bodies (imports can be large).
 	MaxBodyBytes int64
@@ -23,36 +25,52 @@ type Options struct {
 	AllowOrigin string
 }
 
-// NewRouter builds the API:
+// NewRouter builds the API. Every /v1 request carries the device id in
+// X-Device-Id; there are no accounts. A device sees only the projects it
+// created or joined with the code.
 //
-//	GET  /healthz
-//	GET  /v1/summary
-//	GET  /v1/projects
-//	GET  /v1/projects/{id}
-//	GET  /v1/projects/{id}/parts   ?q= &scanned=true|false &sort=scans|mpn &limit=
-//	POST /v1/projects/{id}/imports
-//	POST /v1/scans
-//	GET  /v1/scans                 ?project= &device= &part= &source= &found= &from= &to= &limit=
-//	GET  /v1/stats/scans           ?by=part|supplier_part|project|device|source|order|day|result + filters &tz= &limit=
+//	GET    /healthz
+//	PUT    /v1/device                                    register / rename this device
+//	GET    /v1/projects                                  my projects
+//	POST   /v1/projects                                  create  {name} -> code
+//	POST   /v1/projects/join                             join    {code}
+//	GET    /v1/projects/{pid}                            detail: members, lists, last scans  ?recent=
+//	POST   /v1/projects/{pid}/leave
+//	GET    /v1/projects/{pid}/lists
+//	GET    /v1/projects/{pid}/lists/{lid}                whole list (to download)
+//	POST   /v1/projects/{pid}/lists/{lid}/imports        Excel sheet (replace/merge)
+//	PATCH  /v1/projects/{pid}/lists/{lid}                rename  {name, eventId}
+//	DELETE /v1/projects/{pid}/lists/{lid}                ?eventId=
+//	GET    /v1/projects/{pid}/lists/{lid}/parts          ?q= &scanned= &sort= &limit=
+//	GET    /v1/projects/{pid}/scans                      history, newest first  + filters
+//	GET    /v1/projects/{pid}/stats                      ?by= + filters
+//	POST   /v1/scans                                     {scans: [...]}
 func NewRouter(svc Services, opt Options) http.Handler {
 	h := &handlers{svc: svc}
 	if opt.MaxBodyBytes <= 0 {
 		opt.MaxBodyBytes = 64 << 20
 	}
-	auth := APIKey(opt.APIKey)
+	v1mw := []Middleware{APIKey(opt.APIKey), RequireDevice}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.health)
+	v1 := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, Chain(fn, v1mw...)) }
 
-	v1 := func(pattern string, fn http.HandlerFunc) { mux.Handle(pattern, auth(fn)) }
-	v1("GET /v1/summary", h.summary)
-	v1("GET /v1/projects", h.listProjects)
-	v1("GET /v1/projects/{id}", h.getProject)
-	v1("GET /v1/projects/{id}/parts", h.listParts)
-	v1("POST /v1/projects/{id}/imports", h.importProject)
+	v1("PUT /v1/device", h.registerDevice)
+	v1("GET /v1/projects", h.myProjects)
+	v1("POST /v1/projects", h.createProject)
+	v1("POST /v1/projects/join", h.joinProject)
+	v1("GET /v1/projects/{pid}", h.getProject)
+	v1("POST /v1/projects/{pid}/leave", h.leaveProject)
+	v1("GET /v1/projects/{pid}/lists", h.lists)
+	v1("GET /v1/projects/{pid}/lists/{lid}", h.listTable)
+	v1("POST /v1/projects/{pid}/lists/{lid}/imports", h.importList)
+	v1("PATCH /v1/projects/{pid}/lists/{lid}", h.renameList)
+	v1("DELETE /v1/projects/{pid}/lists/{lid}", h.deleteList)
+	v1("GET /v1/projects/{pid}/lists/{lid}/parts", h.parts)
+	v1("GET /v1/projects/{pid}/scans", h.history)
+	v1("GET /v1/projects/{pid}/stats", h.stats)
 	v1("POST /v1/scans", h.recordScans)
-	v1("GET /v1/scans", h.listScans)
-	v1("GET /v1/stats/scans", h.countScans)
 
 	return Chain(mux, Recover, Log, CORS(opt.AllowOrigin), MaxBody(opt.MaxBodyBytes))
 }

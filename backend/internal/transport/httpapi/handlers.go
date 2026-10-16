@@ -19,16 +19,59 @@ func (h *handlers) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (h *handlers) summary(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.svc.Stats.Summary(r.Context()))
+// --- device ---
+
+func (h *handlers) registerDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name     string `json:"name"`
+		Platform string `json:"platform"`
+		Model    string `json:"model"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	d, err := h.svc.Devices.Register(r.Context(), domain.Device{
+		ID: deviceID(r), Name: req.Name, Platform: req.Platform, Model: req.Model,
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
-func (h *handlers) listProjects(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"projects": h.svc.Projects.List(r.Context())})
+// --- projects ---
+
+func (h *handlers) myProjects(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"projects": h.svc.Projects.Mine(r.Context(), deviceID(r))})
 }
 
-func (h *handlers) getProject(w http.ResponseWriter, r *http.Request) {
-	p, err := h.svc.Projects.Get(r.Context(), r.PathValue("id"))
+func (h *handlers) createProject(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	p, err := h.svc.Projects.Create(r.Context(), deviceID(r), req.Name)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, p)
+}
+
+func (h *handlers) joinProject(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	p, err := h.svc.Projects.Join(r.Context(), deviceID(r), req.Code)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -36,55 +79,63 @@ func (h *handlers) getProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-func (h *handlers) listParts(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	scanned, err := optBool(q, "scanned")
+func (h *handlers) getProject(w http.ResponseWriter, r *http.Request) {
+	p, err := h.svc.Projects.Get(r.Context(), deviceID(r), r.PathValue("pid"), atoi(r.URL.Query().Get("recent")))
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	parts, total, err := h.svc.Projects.Parts(r.Context(), r.PathValue("id"), usecase.PartsQuery{
-		Search:  q.Get("q"),
-		Scanned: scanned,
-		Sort:    q.Get("sort"),
-		Limit:   atoi(q.Get("limit")),
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (h *handlers) leaveProject(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.Projects.Leave(r.Context(), deviceID(r), r.PathValue("pid")); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- lists ---
+
+func (h *handlers) lists(w http.ResponseWriter, r *http.Request) {
+	lists, err := h.svc.Lists.All(r.Context(), deviceID(r), r.PathValue("pid"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lists": lists})
+}
+
+func (h *handlers) listTable(w http.ResponseWriter, r *http.Request) {
+	sum, table, err := h.svc.Lists.Table(r.Context(), deviceID(r), r.PathValue("pid"), r.PathValue("lid"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"list": sum, "headers": table.Headers, "rows": table.Rows, "mpnIndex": table.MPNIndex,
 	})
-	if err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if parts == nil {
-		parts = []usecase.PartCount{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": total, "parts": parts})
 }
 
-type importRequest struct {
-	EventID  string     `json:"eventId"`
-	Name     string     `json:"name"`
-	DeviceID string     `json:"deviceId"`
-	Mode     string     `json:"mode"`
-	Headers  []string   `json:"headers"`
-	Rows     [][]string `json:"rows"`
-	MPNIndex int        `json:"mpnIndex"`
-}
-
-func (h *handlers) importProject(w http.ResponseWriter, r *http.Request) {
-	var req importRequest
+func (h *handlers) importList(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		EventID  string     `json:"eventId"`
+		Name     string     `json:"name"`
+		Mode     string     `json:"mode"`
+		Headers  []string   `json:"headers"`
+		Rows     [][]string `json:"rows"`
+		MPNIndex int        `json:"mpnIndex"`
+	}
 	if err := decode(r, &req); err != nil {
 		writeError(w, r, err)
 		return
 	}
-	out, err := h.svc.Projects.Import(r.Context(), usecase.ImportInput{
-		EventID:   req.EventID,
-		ProjectID: r.PathValue("id"),
-		Name:      req.Name,
-		DeviceID:  req.DeviceID,
+	out, err := h.svc.Lists.Import(r.Context(), usecase.ImportInput{
+		EventID: req.EventID, DeviceID: deviceID(r),
+		ProjectID: r.PathValue("pid"), ListID: r.PathValue("lid"), Name: req.Name,
 		Data: domain.ImportData{
-			Mode:     domain.ImportMode(strings.ToLower(req.Mode)),
-			Headers:  req.Headers,
-			Rows:     req.Rows,
-			MPNIndex: req.MPNIndex,
+			Mode: domain.ImportMode(strings.ToLower(req.Mode)), Headers: req.Headers, Rows: req.Rows, MPNIndex: req.MPNIndex,
 		},
 	})
 	if err != nil {
@@ -98,13 +149,60 @@ func (h *handlers) importProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, out)
 }
 
+func (h *handlers) renameList(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		EventID string `json:"eventId"`
+		Name    string `json:"name"`
+	}
+	if err := decode(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := h.svc.Lists.Rename(r.Context(), deviceID(r), r.PathValue("pid"), r.PathValue("lid"), req.EventID, req.Name); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handlers) deleteList(w http.ResponseWriter, r *http.Request) {
+	err := h.svc.Lists.Delete(r.Context(), deviceID(r), r.PathValue("pid"), r.PathValue("lid"), r.URL.Query().Get("eventId"))
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handlers) parts(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	scanned, err := optBool(q, "scanned")
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	parts, total, err := h.svc.Lists.Parts(r.Context(), deviceID(r), r.PathValue("pid"), r.PathValue("lid"), usecase.PartsQuery{
+		Search: q.Get("q"), Scanned: scanned, Sort: q.Get("sort"), Limit: atoi(q.Get("limit")),
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if parts == nil {
+		parts = []usecase.PartCount{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"total": total, "parts": parts})
+}
+
+// --- scans ---
+
 // scanRequest is a scan as the app sends it; quantity comes from the label
 // text, so it may be a string or a number.
 type scanRequest struct {
 	ID           string    `json:"id"`
 	ProjectID    string    `json:"projectId"`
-	ProjectName  string    `json:"projectName"`
-	DeviceID     string    `json:"deviceId"`
+	ListID       string    `json:"listId"`
+	ListName     string    `json:"listName"`
 	DeviceName   string    `json:"deviceName"`
 	Source       string    `json:"source"`
 	Raw          string    `json:"raw"`
@@ -114,15 +212,6 @@ type scanRequest struct {
 	Quantity     flexInt   `json:"quantity"`
 	Found        bool      `json:"found"`
 	ScannedAt    time.Time `json:"scannedAt"`
-}
-
-func (s scanRequest) toDomain() domain.Scan {
-	return domain.Scan{
-		ID: s.ID, ProjectID: s.ProjectID, ProjectName: s.ProjectName,
-		DeviceID: s.DeviceID, DeviceName: s.DeviceName, Source: domain.ScanSource(s.Source),
-		Raw: s.Raw, MPN: s.MPN, SupplierPart: s.SupplierPart, OrderNumber: s.OrderNumber,
-		Quantity: int(s.Quantity), Found: s.Found, ScannedAt: s.ScannedAt,
-	}
 }
 
 func (h *handlers) recordScans(w http.ResponseWriter, r *http.Request) {
@@ -135,9 +224,13 @@ func (h *handlers) recordScans(w http.ResponseWriter, r *http.Request) {
 	}
 	scans := make([]domain.Scan, len(req.Scans))
 	for i, s := range req.Scans {
-		scans[i] = s.toDomain()
+		scans[i] = domain.Scan{
+			ID: s.ID, ProjectID: s.ProjectID, ListID: s.ListID, ListName: s.ListName, DeviceName: s.DeviceName,
+			Source: domain.ScanSource(s.Source), Raw: s.Raw, MPN: s.MPN, SupplierPart: s.SupplierPart,
+			OrderNumber: s.OrderNumber, Quantity: int(s.Quantity), Found: s.Found, ScannedAt: s.ScannedAt,
+		}
 	}
-	out, err := h.svc.Scans.Record(r.Context(), scans)
+	out, err := h.svc.Scans.Record(r.Context(), deviceID(r), scans)
 	if err != nil {
 		writeError(w, r, err)
 		return
@@ -145,20 +238,21 @@ func (h *handlers) recordScans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *handlers) listScans(w http.ResponseWriter, r *http.Request) {
-	f, _, err := parseFilter(r.URL.Query())
+func (h *handlers) history(w http.ResponseWriter, r *http.Request) {
+	f, _, err := parseFilter(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	scans, total := h.svc.Scans.Recent(r.Context(), f, atoi(r.URL.Query().Get("limit")))
-	if scans == nil {
-		scans = []domain.Scan{}
+	scans, total, err := h.svc.Scans.History(r.Context(), deviceID(r), f, atoi(r.URL.Query().Get("limit")))
+	if err != nil {
+		writeError(w, r, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"total": total, "scans": scans})
 }
 
-func (h *handlers) countScans(w http.ResponseWriter, r *http.Request) {
+func (h *handlers) stats(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	by := domain.ByPart
 	if v := q.Get("by"); v != "" {
@@ -168,20 +262,26 @@ func (h *handlers) countScans(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	f, loc, err := parseFilter(q)
+	f, loc, err := parseFilter(r)
 	if err != nil {
 		writeError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.svc.Stats.Count(r.Context(), usecase.CountQuery{
+	out, err := h.svc.Stats.Count(r.Context(), deviceID(r), usecase.CountQuery{
 		By: by, Filter: f, Location: loc, Limit: atoi(q.Get("limit")),
-	}))
+	})
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
-// parseFilter reads project, device, part, source, found, from, to and tz.
-// from/to take RFC 3339 or a date (YYYY-MM-DD, in tz); a date "to" is
-// inclusive.
-func parseFilter(q url.Values) (domain.ScanFilter, *time.Location, error) {
+// parseFilter reads the project from the path and list, device ("me" for
+// the caller), part, source, found, from, to and tz from the query. from/to
+// take RFC 3339 or a date (YYYY-MM-DD, in tz); a date "to" is inclusive.
+func parseFilter(r *http.Request) (domain.ScanFilter, *time.Location, error) {
+	q := r.URL.Query()
 	loc := time.UTC
 	if tz := q.Get("tz"); tz != "" {
 		l, err := time.LoadLocation(tz)
@@ -191,9 +291,13 @@ func parseFilter(q url.Values) (domain.ScanFilter, *time.Location, error) {
 		loc = l
 	}
 	f := domain.ScanFilter{
-		ProjectID: q.Get("project"),
+		ProjectID: r.PathValue("pid"),
+		ListID:    q.Get("list"),
 		DeviceID:  q.Get("device"),
 		PartKey:   domain.MPNKey(q.Get("part")),
+	}
+	if f.DeviceID == "me" {
+		f.DeviceID = deviceID(r)
 	}
 	if s := q.Get("source"); s != "" {
 		f.Source = domain.ParseSource(s)
@@ -249,19 +353,12 @@ func atoi(s string) int {
 type flexInt int
 
 func (n *flexInt) UnmarshalJSON(b []byte) error {
-	s := strings.Trim(strings.TrimSpace(string(b)), `"`)
-	if s == "" || s == "null" {
-		*n = 0
-		return nil
-	}
-	if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
-		*n = flexInt(v)
-		return nil
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		*n = flexInt(f)
-		return nil
-	}
+	s := strings.TrimSpace(strings.Trim(strings.TrimSpace(string(b)), `"`))
 	*n = 0
+	if v, err := strconv.Atoi(s); err == nil {
+		*n = flexInt(v)
+	} else if f, err := strconv.ParseFloat(s, 64); err == nil {
+		*n = flexInt(f)
+	}
 	return nil
 }

@@ -16,7 +16,7 @@ func TestMPNKeyMatchesApp(t *testing.T) {
 
 func TestImportReplaceThenMerge(t *testing.T) {
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	p := NewProject("l1", "BOM", at)
+	p := NewList("l1", "p1", "BOM", at)
 
 	res := p.Import(ImportData{
 		Mode:    ImportReplace,
@@ -27,7 +27,7 @@ func TestImportReplaceThenMerge(t *testing.T) {
 			{"RC0805FR-07820KL", "B1", "100"},
 			{"", "X", "1"},
 		},
-	}, at)
+	}, 1, "dev", at)
 	if res != (ImportResult{Inserted: 3, Skipped: 1}) {
 		t.Fatalf("replace: %+v", res)
 	}
@@ -42,7 +42,7 @@ func TestImportReplaceThenMerge(t *testing.T) {
 		Headers:  []string{"bin", "Mpn", "Note"},
 		Rows:     [][]string{{"C9", "lm358dr", "new"}, {"D1", "NE555", ""}},
 		MPNIndex: 1,
-	}, at.Add(time.Hour))
+	}, 2, "dev", at.Add(time.Hour))
 	if res != (ImportResult{Inserted: 1, Updated: 1, Removed: 1}) {
 		t.Fatalf("merge: %+v", res)
 	}
@@ -57,14 +57,40 @@ func TestImportReplaceThenMerge(t *testing.T) {
 	if want := []string{"MPN", "Bin", "Qty", "Note"}; len(p.Fields) != len(want) {
 		t.Fatalf("fields: %v", p.Fields)
 	}
-	if p.RowCount != 3 || p.Imports != 2 {
-		t.Fatalf("rows=%d imports=%d", p.RowCount, p.Imports)
+	if p.RowCount != 3 || p.Imports != 2 || p.Version != 2 {
+		t.Fatalf("rows=%d imports=%d version=%d", p.RowCount, p.Imports, p.Version)
+	}
+
+	// The table for download keeps import order and every field.
+	table := p.Table()
+	if table.Headers[table.MPNIndex] != "MPN" || len(table.Rows) != 3 || table.Rows[0][table.MPNIndex] != "lm358dr" {
+		t.Fatalf("table: %+v", table)
+	}
+	if table.Rows[2][table.MPNIndex] != "NE555" {
+		t.Fatalf("new parts go last: %+v", table.Rows)
+	}
+}
+
+func TestProjectCodes(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		c := NewCode()
+		if NormalizeCode(c) != c || len(c) != 9 || seen[c] {
+			t.Fatalf("bad or repeated code %q", c)
+		}
+		seen[c] = true
+	}
+	if NormalizeCode("k7f2 qx9m") != "K7F2-QX9M" {
+		t.Fatal("codes must accept any case and spaces")
+	}
+	if NormalizeCode("K7F2-QX9") != "" || NormalizeCode("K7F2-QX9O") != "" {
+		t.Fatal("short codes and look-alike letters are rejected")
 	}
 }
 
 func TestRenameIgnoresOlderNames(t *testing.T) {
 	at := time.Now()
-	p := NewProject("l1", "New name", at)
+	p := NewList("l1", "p1", "New name", at)
 	p.Rename("Old name", at.Add(-time.Minute))
 	if p.Name != "New name" {
 		t.Fatalf("name = %q", p.Name)
@@ -74,9 +100,9 @@ func TestRenameIgnoresOlderNames(t *testing.T) {
 func TestCountScans(t *testing.T) {
 	day := time.Date(2026, 3, 1, 22, 30, 0, 0, time.UTC)
 	scans := []Scan{
-		{ProjectID: "a", MPNKey: "LM358DR", MPN: "LM358DR", DeviceID: "d1", Found: true, Quantity: 10, ScannedAt: day},
-		{ProjectID: "a", MPNKey: "LM358DR", MPN: "LM358DR", DeviceID: "d2", Found: true, Quantity: 5, ScannedAt: day.Add(time.Hour)},
-		{ProjectID: "b", MPNKey: "NE555", MPN: "NE555", DeviceID: "d1", ScannedAt: day.Add(2 * time.Hour)},
+		{ListID: "a", MPNKey: "LM358DR", MPN: "LM358DR", DeviceID: "d1", Found: true, Quantity: 10, ScannedAt: day},
+		{ListID: "a", MPNKey: "LM358DR", MPN: "LM358DR", DeviceID: "d2", Found: true, Quantity: 5, ScannedAt: day.Add(time.Hour)},
+		{ListID: "b", MPNKey: "NE555", MPN: "NE555", DeviceID: "d1", ScannedAt: day.Add(2 * time.Hour)},
 	}
 
 	groups, matched := CountScans(scans, ByPart, ScanFilter{}, nil)
@@ -84,15 +110,15 @@ func TestCountScans(t *testing.T) {
 		t.Fatalf("by part: %+v", groups)
 	}
 
-	groups, _ = CountScans(scans, ByDevice, ScanFilter{ProjectID: "a"}, nil)
+	groups, _ = CountScans(scans, ByDevice, ScanFilter{ListID: "a"}, nil)
 	if len(groups) != 2 || groups[0].Scans != 1 {
-		t.Fatalf("by device in project a: %+v", groups)
+		t.Fatalf("by device in list a: %+v", groups)
 	}
 
 	notFound := false
-	groups, matched = CountScans(scans, ByProject, ScanFilter{Found: &notFound}, nil)
+	groups, matched = CountScans(scans, ByList, ScanFilter{Found: &notFound}, nil)
 	if matched != 1 || groups[0].Key != "b" || groups[0].NotFound != 1 {
-		t.Fatalf("not found by project: %+v", groups)
+		t.Fatalf("not found by list: %+v", groups)
 	}
 
 	// Riyadh is UTC+3, so the 22:30 UTC scan is already the next day there.

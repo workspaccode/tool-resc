@@ -7,6 +7,7 @@ import 'app/settings.dart';
 import 'app/storage.dart';
 import 'app/theme.dart';
 import 'features/home/home_screen.dart';
+import 'features/sync/device_identity.dart';
 import 'features/sync/sync_controller.dart';
 
 Future<void> main() async {
@@ -17,6 +18,7 @@ Future<void> main() async {
     const SystemUiOverlayStyle(systemNavigationBarColor: Color(0x00000000), systemNavigationBarContrastEnforced: false),
   );
   await initStorage();
+  await ensureDeviceIdentity();
   runApp(const ProviderScope(child: ToolRescApp()));
 }
 

@@ -1,5 +1,6 @@
-// Command server runs the ToolsResc sync backend: it receives the app's
-// imported lists and scans, and counts scans by part, list, device and more.
+// Command server runs the ToolsResc sync backend: devices (no accounts)
+// share projects by code, sync the projects' lists, and record scans that
+// are counted by part, list, device and more.
 package main
 
 import (
@@ -56,7 +57,9 @@ func run() error {
 	slog.Info("state loaded", "events", events, "data", cfg.DataFile, "ms", time.Since(start).Milliseconds())
 
 	svc := httpapi.Services{
+		Devices:  usecase.NewDevices(store, time.Now),
 		Projects: usecase.NewProjects(store, time.Now),
+		Lists:    usecase.NewLists(store, time.Now),
 		Scans:    usecase.NewScans(store, time.Now),
 		Stats:    usecase.NewStats(store),
 	}

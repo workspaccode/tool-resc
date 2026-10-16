@@ -14,6 +14,8 @@ import '../../widgets/icon_tile.dart';
 import '../../widgets/section.dart';
 import '../components/component_lists.dart';
 import '../components/components_providers.dart';
+import '../sync/device_identity.dart';
+import '../sync/projects_controller.dart';
 import '../sync/sync_controller.dart';
 import '../sync/sync_prefs.dart';
 
@@ -75,14 +77,17 @@ Future<void> deleteAllData(ProviderContainer app) async {
   await settings.put(ListKeys.lists, [
     {'id': startId, 'name': 'Main List'},
   ]);
-  await settings.deleteAll(settings.keys.where((k) => k != ListKeys.lists).toList());
+  // The device's id stays: it identifies this hardware, not its data.
+  const keep = {ListKeys.lists, DeviceKeys.id, DeviceKeys.platform, DeviceKeys.model};
+  await settings.deleteAll(settings.keys.where((k) => !keep.contains(k)).toList());
   app.invalidate(listsProvider);
   app.invalidate(listRepositoryProvider(startId));
   app.invalidate(appearanceProvider);
   app.invalidate(searchPrefsProvider);
   await Hive.box<Map>(Boxes.syncQueue).clear();
-  app.invalidate(syncPrefsProvider); // sync off, new device id
+  app.invalidate(syncPrefsProvider); // sync off
   app.invalidate(syncProvider);
+  app.invalidate(projectsProvider);
   app.read(searchQueryProvider.notifier).set('');
   app.read(scannedLabelProvider.notifier).set(null);
 

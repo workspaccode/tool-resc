@@ -3,213 +3,203 @@ package usecase
 import (
 	"context"
 	"sort"
-	"strings"
+	"sync"
 	"time"
 
 	"toolsresc/backend/internal/domain"
 	"toolsresc/backend/internal/state"
 )
 
-// Projects manages the app's lists and their imported parts.
+// Projects creates projects and lets devices join them by code.
 type Projects struct {
 	store Store
 	now   Clock
+
+	mu       sync.Mutex
+	failures map[string][]time.Time // device id -> recent wrong codes
 }
 
-func NewProjects(store Store, now Clock) *Projects { return &Projects{store: store, now: now} }
-
-type ImportInput struct {
-	// EventID makes the import idempotent; the app sends its queue id.
-	EventID   string
-	ProjectID string
-	Name      string
-	DeviceID  string
-	Data      domain.ImportData
+func NewProjects(store Store, now Clock) *Projects {
+	return &Projects{store: store, now: now, failures: map[string][]time.Time{}}
 }
 
-type ImportOutput struct {
-	Duplicate bool                `json:"duplicate"`
-	Result    domain.ImportResult `json:"result"`
-	Project   ProjectSummary      `json:"project"`
-}
+// Wrong codes allowed per device in joinWindow.
+const (
+	maxJoinFailures = 10
+	joinWindow      = 10 * time.Minute
+)
 
-// ProjectSummary is a project with its scan counts.
 type ProjectSummary struct {
 	ID         string     `json:"id"`
+	Code       string     `json:"code"`
 	Name       string     `json:"name"`
-	Fields     []string   `json:"fields"`
-	MPNField   string     `json:"mpnField"`
-	Parts      int        `json:"parts"`
-	Rows       int        `json:"rows"`
-	Imports    int        `json:"imports"`
-	Scans      int        `json:"scans"`
-	Found      int        `json:"found"`
-	NotFound   int        `json:"notFound"`
-	Quantity   int        `json:"quantity"`
-	LastScanAt *time.Time `json:"lastScanAt,omitempty"`
+	CreatedBy  string     `json:"createdBy"`
 	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-}
-
-// PartCount is one imported part with how often it was scanned.
-type PartCount struct {
-	Key        string     `json:"key"`
-	MPN        string     `json:"mpn"`
-	Rows       int        `json:"rows"`
-	Values     domain.Row `json:"values,omitempty"` // first row
+	Members    int        `json:"members"`
+	Lists      int        `json:"lists"`
 	Scans      int        `json:"scans"`
-	Quantity   int        `json:"quantity"`
 	LastScanAt *time.Time `json:"lastScanAt,omitempty"`
 }
 
-func (uc *Projects) Import(ctx context.Context, in ImportInput) (ImportOutput, error) {
-	in.ProjectID = strings.TrimSpace(in.ProjectID)
-	if in.ProjectID == "" {
-		return ImportOutput{}, domain.Invalid("project id is required")
-	}
-	if err := in.Data.Validate(); err != nil {
-		return ImportOutput{}, err
-	}
-	res, err := uc.store.Dispatch(ctx, state.ProjectImported{
-		EventID:   strings.TrimSpace(in.EventID),
-		ProjectID: in.ProjectID,
-		Name:      in.Name,
-		DeviceID:  in.DeviceID,
-		Data:      in.Data,
-		At:        uc.now().UTC(),
-	})
-	if err != nil {
-		return ImportOutput{}, err
-	}
-	out := ImportOutput{Duplicate: res.Duplicate}
-	if r, ok := res.Value.(domain.ImportResult); ok {
-		out.Result = r
-	}
-	out.Project, err = uc.Get(ctx, in.ProjectID)
-	return out, err
+type MemberInfo struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Platform string    `json:"platform,omitempty"`
+	Model    string    `json:"model,omitempty"`
+	JoinedAt time.Time `json:"joinedAt"`
+	LastSeen time.Time `json:"lastSeen"`
+	Scans    int       `json:"scans"`
 }
 
-// List returns every project, most recently scanned or updated first.
-func (uc *Projects) List(_ context.Context) []ProjectSummary {
-	var out []ProjectSummary
+// ProjectDetail is what a member sees when opening a project.
+type ProjectDetail struct {
+	ProjectSummary
+	MemberList []MemberInfo  `json:"memberList"`
+	ListInfo   []ListSummary `json:"listInfo"`
+	Recent     []domain.Scan `json:"recent"` // last scans, newest first
+}
+
+func (uc *Projects) Create(ctx context.Context, deviceID, name string) (ProjectSummary, error) {
+	name, err := domain.ValidName(name)
+	if err != nil {
+		return ProjectSummary{}, err
+	}
+	code := domain.NewCode()
 	uc.store.View(func(s *state.State) {
-		out = make([]ProjectSummary, 0, len(s.Projects))
+		for _, taken := s.ByCode[code]; taken; _, taken = s.ByCode[code] {
+			code = domain.NewCode()
+		}
+	})
+	id := newID()
+	if _, err := uc.store.Dispatch(ctx, state.ProjectCreated{
+		ProjectID: id, Code: code, Name: name, DeviceID: deviceID, At: uc.now().UTC(),
+	}); err != nil {
+		return ProjectSummary{}, err
+	}
+	return uc.summary(id, deviceID)
+}
+
+// Join adds the device to the project with this code.
+func (uc *Projects) Join(ctx context.Context, deviceID, code string) (ProjectSummary, error) {
+	if err := uc.checkAttempts(deviceID); err != nil {
+		return ProjectSummary{}, err
+	}
+	var id string
+	member := false
+	if c := domain.NormalizeCode(code); c != "" {
+		uc.store.View(func(s *state.State) {
+			id = s.ByCode[c]
+			if p, ok := s.Projects[id]; ok {
+				member = p.IsMember(deviceID)
+			}
+		})
+	}
+	if id == "" {
+		uc.fail(deviceID)
+		return ProjectSummary{}, domain.ErrNotFound
+	}
+	if !member {
+		if _, err := uc.store.Dispatch(ctx, state.ProjectJoined{ProjectID: id, DeviceID: deviceID, At: uc.now().UTC()}); err != nil {
+			return ProjectSummary{}, err
+		}
+	}
+	return uc.summary(id, deviceID)
+}
+
+func (uc *Projects) Leave(ctx context.Context, deviceID, projectID string) error {
+	if err := member(uc.store, projectID, deviceID, func(*state.State, *domain.Project) {}); err != nil {
+		return err
+	}
+	_, err := uc.store.Dispatch(ctx, state.ProjectLeft{ProjectID: projectID, DeviceID: deviceID, At: uc.now().UTC()})
+	return err
+}
+
+// Mine lists the device's projects, most recently used first.
+func (uc *Projects) Mine(_ context.Context, deviceID string) []ProjectSummary {
+	out := []ProjectSummary{}
+	uc.store.View(func(s *state.State) {
 		for _, p := range s.Projects {
-			out = append(out, summarize(s, p))
+			if p.IsMember(deviceID) {
+				out = append(out, summarize(s, p))
+			}
 		}
 	})
 	recent := func(p ProjectSummary) time.Time {
-		if p.LastScanAt != nil && p.LastScanAt.After(p.UpdatedAt) {
+		if p.LastScanAt != nil && p.LastScanAt.After(p.CreatedAt) {
 			return *p.LastScanAt
 		}
-		return p.UpdatedAt
+		return p.CreatedAt
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := recent(out[i]), recent(out[j])
-		if !a.Equal(b) {
-			return a.After(b)
-		}
-		return out[i].ID < out[j].ID
-	})
+	sort.Slice(out, func(i, j int) bool { return recent(out[i]).After(recent(out[j])) })
 	return out
 }
 
-func (uc *Projects) Get(_ context.Context, id string) (ProjectSummary, error) {
+// Get returns the project with its members, lists and last scans.
+func (uc *Projects) Get(_ context.Context, deviceID, projectID string, recent int) (ProjectDetail, error) {
+	recent = clampLimit(recent, 20, 200)
+	var out ProjectDetail
+	err := member(uc.store, projectID, deviceID, func(s *state.State, p *domain.Project) {
+		out.ProjectSummary = summarize(s, p)
+		perDevice := map[string]int{}
+		scans := s.Scans[p.ID]
+		for _, sc := range scans {
+			perDevice[sc.DeviceID]++
+		}
+		for id, joined := range p.Members {
+			m := MemberInfo{ID: id, JoinedAt: joined, Scans: perDevice[id]}
+			if d, ok := s.Devices[id]; ok {
+				m.Name, m.Platform, m.Model, m.LastSeen = d.Name, d.Platform, d.Model, d.LastSeen
+			}
+			out.MemberList = append(out.MemberList, m)
+		}
+		sort.Slice(out.MemberList, func(i, j int) bool { return out.MemberList[i].JoinedAt.Before(out.MemberList[j].JoinedAt) })
+		out.ListInfo = listSummaries(s, p)
+		out.Recent = make([]domain.Scan, 0, recent)
+		for i := len(scans) - 1; i >= 0 && len(out.Recent) < recent; i-- {
+			out.Recent = append(out.Recent, scans[i])
+		}
+	})
+	return out, err
+}
+
+func (uc *Projects) summary(id, deviceID string) (ProjectSummary, error) {
 	var out ProjectSummary
-	var ok bool
-	uc.store.View(func(s *state.State) {
-		var p *domain.Project
-		if p, ok = s.Projects[id]; ok {
-			out = summarize(s, p)
-		}
-	})
-	if !ok {
-		return ProjectSummary{}, domain.ErrNotFound
-	}
-	return out, nil
-}
-
-// PartsQuery selects parts of a project.
-type PartsQuery struct {
-	// Search matches MPNs containing it (normalized, like the app).
-	Search string
-	// Scanned: nil = all parts, true = only scanned, false = never scanned.
-	Scanned *bool
-	// Sort: "scans" (default, most first) or "mpn".
-	Sort  string
-	Limit int
-}
-
-// Parts lists a project's imported parts with their scan counts. total is
-// the number of matches before the limit.
-func (uc *Projects) Parts(_ context.Context, id string, q PartsQuery) (parts []PartCount, total int, err error) {
-	key := domain.MPNKey(q.Search)
-	limit := clampLimit(q.Limit, 100, 5000)
-	found := false
-	uc.store.View(func(s *state.State) {
-		p, ok := s.Projects[id]
-		if !ok {
-			return
-		}
-		found = true
-		tallies := s.PartTally[id]
-		for _, part := range p.Parts {
-			if key != "" && !strings.Contains(part.Key, key) {
-				continue
-			}
-			pc := PartCount{Key: part.Key, MPN: part.MPN, Rows: len(part.Rows)}
-			if len(part.Rows) > 0 {
-				pc.Values = copyRow(part.Rows[0])
-			}
-			if t := tallies[part.Key]; t != nil {
-				pc.Scans, pc.Quantity, pc.LastScanAt = t.Scans, t.Quantity, timePtr(t.LastAt)
-			}
-			if q.Scanned != nil && (pc.Scans > 0) != *q.Scanned {
-				continue
-			}
-			parts = append(parts, pc)
-		}
-	})
-	if !found {
-		return nil, 0, domain.ErrNotFound
-	}
-	sort.Slice(parts, func(i, j int) bool {
-		a, b := parts[i], parts[j]
-		if q.Sort != "mpn" && a.Scans != b.Scans {
-			return a.Scans > b.Scans
-		}
-		return a.Key < b.Key
-	})
-	total = len(parts)
-	if len(parts) > limit {
-		parts = parts[:limit]
-	}
-	return parts, total, nil
+	err := member(uc.store, id, deviceID, func(s *state.State, p *domain.Project) { out = summarize(s, p) })
+	return out, err
 }
 
 func summarize(s *state.State, p *domain.Project) ProjectSummary {
 	out := ProjectSummary{
-		ID:        p.ID,
-		Name:      p.Name,
-		Fields:    append([]string{}, p.Fields...),
-		MPNField:  p.MPNField,
-		Parts:     len(p.Parts),
-		Rows:      p.RowCount,
-		Imports:   p.Imports,
-		CreatedAt: p.CreatedAt,
-		UpdatedAt: p.UpdatedAt,
+		ID: p.ID, Code: p.Code, Name: p.Name, CreatedBy: p.CreatedBy, CreatedAt: p.CreatedAt,
+		Members: len(p.Members), Lists: len(p.Lists),
 	}
-	if t := s.ProjectTally[p.ID]; t != nil {
-		out.Scans, out.Found, out.NotFound = t.Scans, t.Found, t.Scans-t.Found
-		out.Quantity, out.LastScanAt = t.Quantity, timePtr(t.LastAt)
+	scans := s.Scans[p.ID]
+	out.Scans = len(scans)
+	if n := len(scans); n > 0 {
+		out.LastScanAt = timePtr(scans[n-1].ScannedAt)
 	}
 	return out
 }
 
-func copyRow(r domain.Row) domain.Row {
-	out := make(domain.Row, len(r))
-	for k, v := range r {
-		out[k] = v
+func (uc *Projects) checkAttempts(deviceID string) error {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	cutoff := uc.now().Add(-joinWindow)
+	recent := uc.failures[deviceID][:0]
+	for _, t := range uc.failures[deviceID] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
 	}
-	return out
+	uc.failures[deviceID] = recent
+	if len(recent) >= maxJoinFailures {
+		return domain.ErrTooManyAttempts
+	}
+	return nil
+}
+
+func (uc *Projects) fail(deviceID string) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+	uc.failures[deviceID] = append(uc.failures[deviceID], uc.now())
 }

@@ -12,36 +12,164 @@ import (
 type Kind string
 
 const (
-	KindProjectImported Kind = "project.imported"
-	KindScanRecorded    Kind = "scan.recorded"
+	KindDeviceRegistered Kind = "device.registered"
+	KindProjectCreated   Kind = "project.created"
+	KindProjectJoined    Kind = "project.joined"
+	KindProjectLeft      Kind = "project.left"
+	KindListImported     Kind = "list.imported"
+	KindListRenamed      Kind = "list.renamed"
+	KindListDeleted      Kind = "list.deleted"
+	KindScanRecorded     Kind = "scan.recorded"
 )
 
 // Event is a fact that changes the state. Apply is its reducer: it must be
 // deterministic and must not fail, because it also runs when the log is
-// replayed. Validate the input before dispatching.
+// replayed. Use cases validate (including membership) before dispatching.
 type Event interface {
 	// ID is unique per event; a second event with the same id is ignored.
+	// Empty: never deduplicated.
 	ID() string
 	Kind() Kind
-	Apply(s *State) any
+	Apply(s *State, seq uint64) any
 }
 
-// ProjectImported is an Excel sheet imported into a project (list).
-type ProjectImported struct {
+// DeviceRegistered is a device saying hello (also when its name changes).
+type DeviceRegistered struct {
+	Device domain.Device `json:"device"`
+	At     time.Time     `json:"at"`
+}
+
+func (DeviceRegistered) ID() string { return "" }
+func (DeviceRegistered) Kind() Kind { return KindDeviceRegistered }
+func (e DeviceRegistered) Apply(s *State, _ uint64) any {
+	d, ok := s.Devices[e.Device.ID]
+	if !ok {
+		d = &domain.Device{ID: e.Device.ID, FirstSeen: e.At}
+		s.Devices[d.ID] = d
+	}
+	d.Name, d.Platform, d.Model, d.LastSeen = e.Device.Name, e.Device.Platform, e.Device.Model, e.At
+	return *d
+}
+
+type ProjectCreated struct {
+	ProjectID string    `json:"projectId"`
+	Code      string    `json:"code"`
+	Name      string    `json:"name"`
+	DeviceID  string    `json:"deviceId"`
+	At        time.Time `json:"at"`
+}
+
+func (ProjectCreated) ID() string { return "" }
+func (ProjectCreated) Kind() Kind { return KindProjectCreated }
+func (e ProjectCreated) Apply(s *State, _ uint64) any {
+	p := domain.NewProject(e.ProjectID, e.Code, e.Name, e.DeviceID, e.At)
+	s.Projects[p.ID] = p
+	s.ByCode[p.Code] = p.ID
+	return p
+}
+
+type ProjectJoined struct {
+	ProjectID string    `json:"projectId"`
+	DeviceID  string    `json:"deviceId"`
+	At        time.Time `json:"at"`
+}
+
+func (ProjectJoined) ID() string { return "" }
+func (ProjectJoined) Kind() Kind { return KindProjectJoined }
+func (e ProjectJoined) Apply(s *State, _ uint64) any {
+	if p, ok := s.Projects[e.ProjectID]; ok && !p.IsMember(e.DeviceID) {
+		p.Members[e.DeviceID] = e.At
+	}
+	return nil
+}
+
+type ProjectLeft struct {
+	ProjectID string    `json:"projectId"`
+	DeviceID  string    `json:"deviceId"`
+	At        time.Time `json:"at"`
+}
+
+func (ProjectLeft) ID() string { return "" }
+func (ProjectLeft) Kind() Kind { return KindProjectLeft }
+func (e ProjectLeft) Apply(s *State, _ uint64) any {
+	if p, ok := s.Projects[e.ProjectID]; ok {
+		delete(p.Members, e.DeviceID)
+	}
+	return nil
+}
+
+// ListImported is an Excel sheet imported into a list of a project. The
+// list is created on its first import.
+type ListImported struct {
 	EventID   string            `json:"eventId"`
 	ProjectID string            `json:"projectId"`
+	ListID    string            `json:"listId"`
 	Name      string            `json:"name"`
-	DeviceID  string            `json:"deviceId,omitempty"`
+	DeviceID  string            `json:"deviceId"`
 	Data      domain.ImportData `json:"data"`
 	At        time.Time         `json:"at"`
 }
 
-func (e ProjectImported) ID() string { return e.EventID }
-func (ProjectImported) Kind() Kind   { return KindProjectImported }
+func (e ListImported) ID() string { return e.EventID }
+func (ListImported) Kind() Kind   { return KindListImported }
 
-// Apply returns the domain.ImportResult.
-func (e ProjectImported) Apply(s *State) any {
-	return s.project(e.ProjectID, e.Name, e.At).Import(e.Data, e.At)
+// Apply returns the updated *domain.List and the domain.ImportResult.
+func (e ListImported) Apply(s *State, seq uint64) any {
+	p, ok := s.Projects[e.ProjectID]
+	if !ok {
+		return nil
+	}
+	l, ok := p.Lists[e.ListID]
+	if !ok {
+		l = domain.NewList(e.ListID, p.ID, e.Name, e.At)
+		p.Lists[l.ID] = l
+	}
+	l.Rename(e.Name, e.At)
+	s.touchDevice(e.DeviceID, e.At)
+	return ImportApplied{List: l, Result: l.Import(e.Data, seq, e.DeviceID, e.At)}
+}
+
+// ImportApplied is what ListImported.Apply returns.
+type ImportApplied struct {
+	List   *domain.List
+	Result domain.ImportResult
+}
+
+type ListRenamed struct {
+	EventID   string    `json:"eventId"`
+	ProjectID string    `json:"projectId"`
+	ListID    string    `json:"listId"`
+	Name      string    `json:"name"`
+	At        time.Time `json:"at"`
+}
+
+func (e ListRenamed) ID() string { return e.EventID }
+func (ListRenamed) Kind() Kind   { return KindListRenamed }
+func (e ListRenamed) Apply(s *State, _ uint64) any {
+	if p, ok := s.Projects[e.ProjectID]; ok {
+		if l, ok := p.Lists[e.ListID]; ok {
+			l.Rename(e.Name, e.At)
+		}
+	}
+	return nil
+}
+
+// ListDeleted removes a list from the project; its scans stay in the
+// history.
+type ListDeleted struct {
+	EventID   string    `json:"eventId"`
+	ProjectID string    `json:"projectId"`
+	ListID    string    `json:"listId"`
+	At        time.Time `json:"at"`
+}
+
+func (e ListDeleted) ID() string { return e.EventID }
+func (ListDeleted) Kind() Kind   { return KindListDeleted }
+func (e ListDeleted) Apply(s *State, _ uint64) any {
+	if p, ok := s.Projects[e.ProjectID]; ok {
+		delete(p.Lists, e.ListID)
+	}
+	return nil
 }
 
 // ScanRecorded is one scan, as the device sent it.
@@ -52,14 +180,17 @@ type ScanRecorded struct {
 func (e ScanRecorded) ID() string { return e.Scan.ID }
 func (ScanRecorded) Kind() Kind   { return KindScanRecorded }
 
-// Apply checks the scan against the project's parts and returns the stored
-// domain.Scan.
-func (e ScanRecorded) Apply(s *State) any {
+// Apply checks the scan against its list and returns the stored domain.Scan.
+func (e ScanRecorded) Apply(s *State, _ uint64) any {
 	sc := e.Scan
-	p := s.project(sc.ProjectID, sc.ProjectName, sc.ScannedAt)
-	sc.Resolve(p)
-	sc.ProjectName = p.Name
-	s.Scans = append(s.Scans, sc)
+	if p, ok := s.Projects[sc.ProjectID]; ok {
+		sc.Resolve(p.Lists[sc.ListID])
+	}
+	if d, ok := s.Devices[sc.DeviceID]; ok {
+		sc.DeviceName = d.Name
+	}
+	s.touchDevice(sc.DeviceID, sc.ScannedAt)
+	s.Scans[sc.ProjectID] = append(s.Scans[sc.ProjectID], sc)
 	s.tallyScan(sc)
 	return sc
 }
@@ -73,8 +204,14 @@ type Envelope struct {
 }
 
 var decoders = map[Kind]func([]byte) (Event, error){
-	KindProjectImported: decodeAs[ProjectImported],
-	KindScanRecorded:    decodeAs[ScanRecorded],
+	KindDeviceRegistered: decodeAs[DeviceRegistered],
+	KindProjectCreated:   decodeAs[ProjectCreated],
+	KindProjectJoined:    decodeAs[ProjectJoined],
+	KindProjectLeft:      decodeAs[ProjectLeft],
+	KindListImported:     decodeAs[ListImported],
+	KindListRenamed:      decodeAs[ListRenamed],
+	KindListDeleted:      decodeAs[ListDeleted],
+	KindScanRecorded:     decodeAs[ScanRecorded],
 }
 
 func decodeAs[T Event](data []byte) (Event, error) {

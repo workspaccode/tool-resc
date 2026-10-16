@@ -44,6 +44,9 @@ dependencies:
   mobile_scanner: ^7.4.2
   path: ^1.9.1
   http: ^1.6.0
+  device_info_plus: ^13.3.0
+  android_id: ^0.6.0
+  crypto: ^3.0.7
 dev_dependencies:
   flutter_test:
     sdk: flutter

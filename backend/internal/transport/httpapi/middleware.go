@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"toolsresc/backend/internal/domain"
 )
 
 // Middleware wraps a handler (decorator pattern).
@@ -63,8 +66,8 @@ func CORS(origin string) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", origin)
-			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key")
-			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-API-Key, X-Device-Id")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
@@ -104,4 +107,24 @@ func MaxBody(n int64) Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type ctxKey struct{}
+
+// RequireDevice reads the device id from X-Device-Id into the context.
+func RequireDevice(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.Header.Get("X-Device-Id"))
+		if err := domain.ValidDeviceID(id); err != nil {
+			writeJSON(w, http.StatusBadRequest, errorBody{"X-Device-Id: " + err.Error()})
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
+	})
+}
+
+// deviceID is the id RequireDevice stored.
+func deviceID(r *http.Request) string {
+	id, _ := r.Context().Value(ctxKey{}).(string)
+	return id
 }

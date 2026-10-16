@@ -86,5 +86,5 @@ func (st *State) apply(seq uint64, e Event) any {
 	if id := e.ID(); id != "" {
 		st.seen[id] = struct{}{}
 	}
-	return e.Apply(st)
+	return e.Apply(st, seq)
 }

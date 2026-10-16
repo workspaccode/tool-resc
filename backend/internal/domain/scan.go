@@ -25,12 +25,13 @@ func ParseSource(s string) ScanSource {
 	}
 }
 
-// Scan is one scanned label, checked against one project.
+// Scan is one scanned label, checked against one list of a project.
 type Scan struct {
 	ID           string     `json:"id"`
 	ProjectID    string     `json:"projectId"`
-	ProjectName  string     `json:"projectName,omitempty"`
-	DeviceID     string     `json:"deviceId,omitempty"`
+	ListID       string     `json:"listId"`
+	ListName     string     `json:"listName,omitempty"`
+	DeviceID     string     `json:"deviceId"`
 	DeviceName   string     `json:"deviceName,omitempty"`
 	Source       ScanSource `json:"source"`
 	Raw          string     `json:"raw,omitempty"`
@@ -49,9 +50,8 @@ const maxRawLen = 4096
 func (s *Scan) Normalize() {
 	s.ID = strings.TrimSpace(s.ID)
 	s.ProjectID = strings.TrimSpace(s.ProjectID)
-	s.ProjectName = strings.TrimSpace(s.ProjectName)
-	s.DeviceID = strings.TrimSpace(s.DeviceID)
-	s.DeviceName = strings.TrimSpace(s.DeviceName)
+	s.ListID = strings.TrimSpace(s.ListID)
+	s.ListName = strings.TrimSpace(s.ListName)
 	s.MPN = strings.TrimSpace(s.MPN)
 	s.MPNKey = MPNKey(s.MPN)
 	s.SupplierPart = strings.TrimSpace(s.SupplierPart)
@@ -71,8 +71,8 @@ func (s Scan) Validate() error {
 	switch {
 	case s.ID == "":
 		return Invalid("scan id is required")
-	case s.ProjectID == "":
-		return Invalid("scan %s: projectId is required", s.ID)
+	case s.ProjectID == "" || s.ListID == "":
+		return Invalid("scan %s: projectId and listId are required", s.ID)
 	case s.MPNKey == "":
 		return Invalid("scan %s: mpn has no letters or digits", s.ID)
 	case s.ScannedAt.IsZero():
@@ -81,14 +81,17 @@ func (s Scan) Validate() error {
 	return nil
 }
 
-// Resolve checks the scan against the project's imported parts. A project
-// with data is the authority on Found; without data the device's answer is
-// kept.
-func (s *Scan) Resolve(p *Project) {
-	if p == nil || len(p.Parts) == 0 {
+// Resolve checks the scan against the list's parts. A list with data is
+// the authority on Found; otherwise the device's answer is kept.
+func (s *Scan) Resolve(l *List) {
+	if l == nil {
 		return
 	}
-	part, ok := p.Parts[s.MPNKey]
+	s.ListName = l.Name
+	if len(l.Parts) == 0 {
+		return
+	}
+	part, ok := l.Parts[s.MPNKey]
 	s.Found = ok
 	if ok && part.MPN != "" {
 		s.MPN = part.MPN // as stored, not as printed on the label

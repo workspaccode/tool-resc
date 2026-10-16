@@ -1,192 +1,83 @@
 package domain
 
 import (
-	"fmt"
+	"crypto/rand"
 	"strings"
 	"time"
 )
 
-// ImportMode mirrors the app: replace a project's data, or merge into it.
-type ImportMode string
-
-const (
-	ImportReplace ImportMode = "replace"
-	ImportMerge   ImportMode = "merge"
-)
-
-func (m ImportMode) Valid() bool { return m == ImportReplace || m == ImportMerge }
-
-// Row is one imported Excel row: field label -> value, empty values omitted.
-type Row map[string]string
-
-// Part is every row of one MPN in a project.
-type Part struct {
-	Key  string `json:"key"`
-	MPN  string `json:"mpn"`
-	Rows []Row  `json:"rows"`
-}
-
-// ImportData is one Excel sheet as the app sends it.
-type ImportData struct {
-	Mode     ImportMode `json:"mode"`
-	Headers  []string   `json:"headers"`
-	Rows     [][]string `json:"rows"`
-	MPNIndex int        `json:"mpnIndex"`
-}
-
-// Validate checks the sheet can be imported.
-func (d ImportData) Validate() error {
-	if !d.Mode.Valid() {
-		return Invalid("mode must be %q or %q", ImportReplace, ImportMerge)
-	}
-	if len(d.Headers) == 0 {
-		return Invalid("headers are required")
-	}
-	if d.MPNIndex < 0 || d.MPNIndex >= len(d.Headers) {
-		return Invalid("mpnIndex %d is out of range", d.MPNIndex)
-	}
-	return nil
-}
-
-// ImportResult says what an import changed.
-type ImportResult struct {
-	Inserted int `json:"inserted"`
-	Updated  int `json:"updated"`
-	Removed  int `json:"removed"`
-	Skipped  int `json:"skipped"`
-}
-
-// Project is one component list of the app (an order, BOM or customer).
+// Project is shared by code: every device that enters the code becomes a
+// member and syncs the project's lists and scans.
 type Project struct {
-	ID        string           `json:"id"`
-	Name      string           `json:"name"`
-	Fields    []string         `json:"fields"`
-	MPNField  string           `json:"mpnField"`
-	Parts     map[string]*Part `json:"-"`
-	RowCount  int              `json:"rows"`
-	Imports   int              `json:"imports"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
+	ID        string    `json:"id"`
+	Code      string    `json:"code"` // XXXX-XXXX
+	Name      string    `json:"name"`
+	CreatedBy string    `json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
 
-	// namedAt is when Name was last set, so a late, queued event carrying
-	// an older name doesn't undo a rename.
-	namedAt time.Time
+	// Members: device id -> when it joined.
+	Members map[string]time.Time `json:"-"`
+	Lists   map[string]*List     `json:"-"`
 }
 
-func NewProject(id, name string, at time.Time) *Project {
-	p := &Project{ID: id, Parts: map[string]*Part{}, CreatedAt: at, UpdatedAt: at}
-	p.Rename(name, at)
-	return p
+func NewProject(id, code, name, deviceID string, at time.Time) *Project {
+	return &Project{
+		ID: id, Code: code, Name: name, CreatedBy: deviceID, CreatedAt: at,
+		Members: map[string]time.Time{deviceID: at},
+		Lists:   map[string]*List{},
+	}
 }
 
-// Rename sets the name if it is newer than the current one.
-func (p *Project) Rename(name string, at time.Time) {
+func (p *Project) IsMember(deviceID string) bool {
+	_, ok := p.Members[deviceID]
+	return ok
+}
+
+// codeAlphabet has no look-alikes (0/O, 1/I/L), so codes are easy to read
+// out and type.
+const codeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+const codeLen = 8
+
+// NewCode returns a random code like "K7F2-QX9M" (about 40 bits).
+func NewCode() string {
+	b := make([]byte, codeLen)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // crypto/rand doesn't fail on supported platforms
+	}
+	var s strings.Builder
+	for i, v := range b {
+		if i == codeLen/2 {
+			s.WriteByte('-')
+		}
+		s.WriteByte(codeAlphabet[int(v)%len(codeAlphabet)])
+	}
+	return s.String()
+}
+
+// NormalizeCode accepts any case, spaces and dashes: "k7f2 qx9m" ->
+// "K7F2-QX9M". Empty if it can't be a code.
+func NormalizeCode(code string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(code) {
+		if strings.ContainsRune(codeAlphabet, r) {
+			b.WriteRune(r)
+		} else if r != '-' && r != ' ' {
+			return ""
+		}
+	}
+	s := b.String()
+	if len(s) != codeLen {
+		return ""
+	}
+	return s[:codeLen/2] + "-" + s[codeLen/2:]
+}
+
+// ValidName trims a project or list name.
+func ValidName(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || at.Before(p.namedAt) {
-		return
+	if name == "" {
+		return "", Invalid("name is required")
 	}
-	p.Name, p.namedAt = name, at
-}
-
-// Lookup finds the part a scanned MPN belongs to.
-func (p *Project) Lookup(mpn string) (*Part, bool) {
-	key := MPNKey(mpn)
-	if key == "" {
-		return nil, false
-	}
-	part, ok := p.Parts[key]
-	return part, ok
-}
-
-// Import applies a sheet with the app's rules: headers become fields
-// (case-insensitive reuse), rows are grouped by MPN, and in merge mode an
-// MPN's existing rows are paired with the file's rows in order — paired rows
-// are updated (fields missing from the file are kept), extra file rows are
-// added and extra existing rows are removed. The data must be validated.
-func (p *Project) Import(d ImportData, at time.Time) ImportResult {
-	if d.Mode == ImportReplace {
-		p.Parts, p.Fields, p.MPNField = map[string]*Part{}, nil, ""
-	}
-
-	known := make(map[string]string, len(p.Fields))
-	for _, f := range p.Fields {
-		known[strings.ToLower(f)] = f
-	}
-	labels := make([]string, len(d.Headers))
-	for i, h := range d.Headers {
-		h = strings.TrimSpace(h)
-		if h == "" {
-			h = fmt.Sprintf("Column %d", i+1)
-		}
-		if f, ok := known[strings.ToLower(h)]; ok {
-			labels[i] = f
-			continue
-		}
-		known[strings.ToLower(h)] = h
-		p.Fields = append(p.Fields, h)
-		labels[i] = h
-	}
-
-	// Group the file's rows by MPN, keeping file order.
-	var res ImportResult
-	var order []string
-	groups := map[string][][]string{}
-	for _, row := range d.Rows {
-		key := MPNKey(cell(row, d.MPNIndex))
-		if key == "" {
-			res.Skipped++
-			continue
-		}
-		if _, ok := groups[key]; !ok {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], row)
-	}
-
-	for _, key := range order {
-		fileRows := groups[key]
-		var old []Row
-		if part, ok := p.Parts[key]; ok {
-			old = part.Rows
-		}
-		rows := make([]Row, len(fileRows))
-		for i, fr := range fileRows {
-			values := Row{}
-			if i < len(old) {
-				values = old[i]
-				res.Updated++
-			} else {
-				res.Inserted++
-			}
-			// The file's columns overwrite; an empty cell clears that field.
-			for c, label := range labels {
-				if v := strings.TrimSpace(cell(fr, c)); v == "" {
-					delete(values, label)
-				} else {
-					values[label] = v
-				}
-			}
-			rows[i] = values
-		}
-		if len(old) > len(fileRows) {
-			res.Removed += len(old) - len(fileRows)
-		}
-		p.Parts[key] = &Part{Key: key, MPN: strings.TrimSpace(cell(fileRows[0], d.MPNIndex)), Rows: rows}
-	}
-
-	p.MPNField = labels[d.MPNIndex]
-	p.RowCount = 0
-	for _, part := range p.Parts {
-		p.RowCount += len(part.Rows)
-	}
-	p.Imports++
-	p.UpdatedAt = at
-	return res
-}
-
-func cell(row []string, i int) string {
-	if i < len(row) {
-		return row[i]
-	}
-	return ""
+	return limit(name, 120), nil
 }

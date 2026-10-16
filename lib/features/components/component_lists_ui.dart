@@ -9,10 +9,13 @@ import '../../widgets/prompt.dart';
 import 'component_lists.dart';
 import 'components_providers.dart';
 import 'import_sheet.dart';
+import '../sync/sync_controller.dart';
 
 Future<void> renameListDialog(BuildContext context, WidgetRef ref, ComponentList list) async {
   final name = await showTextPrompt(context, title: 'Rename List', initialValue: list.name, confirmLabel: 'Rename');
-  if (name != null) ref.read(listsProvider.notifier).rename(list.id, name);
+  if (name == null) return;
+  ref.read(listsProvider.notifier).rename(list.id, name);
+  ref.read(syncProvider.notifier).recordRename(list, name);
 }
 
 Future<void> deleteListDialog(BuildContext context, WidgetRef ref, ComponentList list) async {
@@ -23,7 +26,11 @@ Future<void> deleteListDialog(BuildContext context, WidgetRef ref, ComponentList
     context: context,
     builder: (dialog) => CupertinoAlertDialog(
       title: Text(last ? 'Clear “${list.name}”?' : 'Delete “${list.name}”?'),
-      content: Text('Its $rows rows will be removed from this device.'),
+      content: Text(
+        list.isShared
+            ? 'Its $rows rows will be removed from this device and from every device in its project.'
+            : 'Its $rows rows will be removed from this device.',
+      ),
       actions: [
         CupertinoDialogAction(
           isDefaultAction: true,
@@ -38,7 +45,9 @@ Future<void> deleteListDialog(BuildContext context, WidgetRef ref, ComponentList
       ],
     ),
   );
-  if (ok == true) await ref.read(listsProvider.notifier).delete(list.id);
+  if (ok != true) return;
+  ref.read(syncProvider.notifier).recordDelete(list);
+  await ref.read(listsProvider.notifier).delete(list.id);
 }
 
 List<ContextMenuAction> _listActions(BuildContext context, WidgetRef ref, ComponentList list) => [

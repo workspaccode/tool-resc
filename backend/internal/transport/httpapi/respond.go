@@ -30,6 +30,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, http.StatusBadRequest, errorBody{err.Error()})
 	case errors.Is(err, domain.ErrNotFound):
 		writeJSON(w, http.StatusNotFound, errorBody{"not found"})
+	case errors.Is(err, domain.ErrTooManyAttempts):
+		writeJSON(w, http.StatusTooManyRequests, errorBody{err.Error()})
 	case errors.As(err, &tooBig):
 		writeJSON(w, http.StatusRequestEntityTooLarge, errorBody{"request body too large"})
 	default:

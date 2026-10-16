@@ -12,7 +12,7 @@ type Dimension string
 const (
 	ByPart         Dimension = "part"          // MPN (name)
 	BySupplierPart Dimension = "supplier_part" // supplier code, e.g. LCSC C141700 (id)
-	ByProject      Dimension = "project"       // the app's list
+	ByList         Dimension = "list"
 	ByDevice       Dimension = "device"
 	BySource       Dimension = "source"
 	ByOrder        Dimension = "order"
@@ -21,7 +21,7 @@ const (
 )
 
 // Dimensions lists every supported dimension.
-var Dimensions = []Dimension{ByPart, BySupplierPart, ByProject, ByDevice, BySource, ByOrder, ByDay, ByResult}
+var Dimensions = []Dimension{ByPart, BySupplierPart, ByList, ByDevice, BySource, ByOrder, ByDay, ByResult}
 
 func ParseDimension(s string) (Dimension, error) {
 	d := Dimension(strings.ToLower(strings.TrimSpace(s)))
@@ -41,8 +41,8 @@ func (d Dimension) groupKey(s Scan, loc *time.Location) (key, label string) {
 		return s.MPNKey, s.MPN
 	case BySupplierPart:
 		return s.SupplierPart, s.SupplierPart
-	case ByProject:
-		return s.ProjectID, s.ProjectName
+	case ByList:
+		return s.ListID, s.ListName
 	case ByDevice:
 		return s.DeviceID, s.DeviceName
 	case BySource:
@@ -64,6 +64,7 @@ func (d Dimension) groupKey(s Scan, loc *time.Location) (key, label string) {
 // ScanFilter narrows the scans that are counted. Zero values match all.
 type ScanFilter struct {
 	ProjectID string
+	ListID    string
 	DeviceID  string
 	PartKey   string
 	Source    ScanSource
@@ -74,6 +75,7 @@ type ScanFilter struct {
 func (f ScanFilter) Match(s Scan) bool {
 	switch {
 	case f.ProjectID != "" && s.ProjectID != f.ProjectID,
+		f.ListID != "" && s.ListID != f.ListID,
 		f.DeviceID != "" && s.DeviceID != f.DeviceID,
 		f.PartKey != "" && s.MPNKey != f.PartKey,
 		f.Source != "" && s.Source != f.Source,
@@ -98,7 +100,7 @@ type Count struct {
 }
 
 // Add counts one scan into the group. The newest scan's label wins, so a
-// renamed project or device shows its current name.
+// renamed list or device shows its current name.
 func (c *Count) Add(s Scan, label string) {
 	c.Scans++
 	if s.Found {

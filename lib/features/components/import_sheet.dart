@@ -12,7 +12,9 @@ import 'component_lists.dart';
 import 'components_providers.dart';
 import 'components_repository.dart';
 import 'excel_reader.dart';
+import '../sync/projects_controller.dart';
 import '../sync/sync_controller.dart';
+import '../sync/sync_prefs.dart';
 
 /// Picks an .xlsx file, shows the import sheet, and reports the result.
 /// [onReading] is told while the file is being read (for a spinner).
@@ -100,6 +102,10 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
   late bool _newList = !ref.read(catalogProvider).isEmpty;
   late final _listName = TextEditingController(text: p.basenameWithoutExtension(widget.fileName));
 
+  /// Server Sync: the project a new list is shared in (null: this device
+  /// only). Starts as the current list's project.
+  late String? _projectId = ref.read(listsProvider).active.projectId;
+
   @override
   void dispose() {
     _listName.dispose();
@@ -117,11 +123,16 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
     final currentIsEmpty = ref.read(catalogProvider).isEmpty;
     String? createdId;
     try {
+      final current = ref.read(listsProvider).active;
       if (_newList) {
         createdId = await lists.create(_listName.text);
       } else if (currentIsEmpty) {
         // First import into an empty list: name it after the file.
-        lists.rename(ref.read(listsProvider).activeId, _listName.text);
+        lists.rename(current.id, _listName.text);
+      }
+      // A new (or still empty) list goes to the chosen project.
+      if ((_newList || currentIsEmpty) && _showProjectPicker) {
+        lists.share(ref.read(listsProvider).activeId, _projectId);
       }
       final mode = _newList || currentIsEmpty ? ImportMode.replace : _mode;
       final result = await ref
@@ -144,6 +155,44 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
       setState(() => _importing = false);
       _alert(context, 'Import Failed', '$e');
     }
+  }
+
+  bool get _showProjectPicker => ref.read(syncPrefsProvider).enabled && ref.read(projectsProvider).isNotEmpty;
+
+  Future<void> _pickProject() async {
+    final projects = ref.read(projectsProvider);
+    final picked = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (sheet) => CupertinoActionSheet(
+        title: const Text('Share List In'),
+        actions: [
+          CupertinoActionSheetAction(onPressed: () => Navigator.pop(sheet, ''), child: const Text('This Device Only')),
+          for (final p in projects)
+            CupertinoActionSheetAction(onPressed: () => Navigator.pop(sheet, p.id), child: Text(p.name)),
+        ],
+        cancelButton: CupertinoActionSheetAction(onPressed: () => Navigator.pop(sheet), child: const Text('Cancel')),
+      ),
+    );
+    if (picked != null) setState(() => _projectId = picked.isEmpty ? null : picked);
+  }
+
+  Widget _projectSection() {
+    final project = ref.watch(projectsProvider.notifier).byId(_projectId);
+    return Section(
+      header: 'Project',
+      footer: project == null
+          ? 'The list stays on this device.'
+          : 'Every device in “${project.name}” gets this list, and scans in it are counted there.',
+      children: [
+        CupertinoListTile(
+          leading: const IconTile(icon: CupertinoIcons.cloud_fill, color: CupertinoColors.systemTeal),
+          title: const Text('Share In'),
+          additionalInfo: Text(project?.name ?? 'This Device Only'),
+          trailing: const CupertinoListTileChevron(),
+          onTap: _pickProject,
+        ),
+      ],
+    );
   }
 
   Widget _destinationSection(bool hasData) {
@@ -264,6 +313,7 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
               ],
             ),
           _destinationSection(hasData),
+          if ((_newList || !hasData) && _showProjectPicker) _projectSection(),
           Section(
             header: 'FIELDS',
             footer: detected

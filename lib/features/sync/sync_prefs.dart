@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_ce/hive_ce.dart';
 
 import '../../app/storage.dart';
+import 'device_identity.dart';
 
 /// Optional server sync settings. Off by default: nothing leaves the device
-/// until it's turned on and a server is set.
+/// until it's turned on and a server is set. There is no account; the
+/// device is known by its id.
 class SyncPrefs {
   const SyncPrefs({
     this.enabled = false,
@@ -15,6 +17,8 @@ class SyncPrefs {
     this.apiKey = '',
     required this.deviceId,
     required this.deviceName,
+    this.platform = '',
+    this.model = '',
   });
 
   final bool enabled;
@@ -25,9 +29,11 @@ class SyncPrefs {
   /// Sent as a Bearer token; empty when the server has no key.
   final String apiKey;
 
-  /// Random, created once per install; scans are counted per device by it.
+  /// Made from the hardware id (see ensureDeviceIdentity).
   final String deviceId;
   final String deviceName;
+  final String platform;
+  final String model;
 
   /// On, with somewhere to send to.
   bool get isReady => enabled && serverUrl.trim().isNotEmpty;
@@ -41,29 +47,33 @@ class SyncPrefs {
     apiKey: apiKey ?? this.apiKey,
     deviceId: deviceId,
     deviceName: deviceName ?? this.deviceName,
+    platform: platform,
+    model: model,
   );
 }
 
 class SyncPrefsNotifier extends Notifier<SyncPrefs> {
   static const _key = 'syncPrefs';
-  static const _deviceIdKey = 'deviceId';
 
   Box<Object> get _box => Hive.box<Object>(Boxes.settings);
 
   @override
   SyncPrefs build() {
-    var deviceId = _box.get(_deviceIdKey) as String?;
+    var deviceId = _box.get(DeviceKeys.id) as String?;
     if (deviceId == null) {
-      deviceId = newSyncId();
-      _box.put(_deviceIdKey, deviceId);
+      deviceId = 'install-${newSyncId()}';
+      _box.put(DeviceKeys.id, deviceId);
     }
+    final model = _box.get(DeviceKeys.model) as String? ?? '';
     final m = (_box.get(_key) as Map?) ?? const {};
     return SyncPrefs(
       enabled: m['enabled'] as bool? ?? false,
       serverUrl: m['serverUrl'] as String? ?? '',
       apiKey: m['apiKey'] as String? ?? '',
       deviceId: deviceId,
-      deviceName: m['deviceName'] as String? ?? _defaultDeviceName(),
+      deviceName: m['deviceName'] as String? ?? (model.isNotEmpty ? model : _defaultDeviceName()),
+      platform: _box.get(DeviceKeys.platform) as String? ?? defaultTargetPlatform.name,
+      model: model,
     );
   }
 
@@ -92,5 +102,5 @@ final syncPrefsProvider = NotifierProvider<SyncPrefsNotifier, SyncPrefs>(SyncPre
 
 final _random = Random.secure();
 
-/// A random 128-bit hex id, for devices and events.
+/// A random 128-bit hex id, for events and lists shared to a project.
 String newSyncId() => [for (var i = 0; i < 16; i++) _random.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
