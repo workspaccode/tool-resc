@@ -9,6 +9,9 @@ import '../../widgets/icon_tile.dart';
 import '../components/components_providers.dart';
 import '../components/component_lists_ui.dart';
 import '../components/components_screen.dart';
+import '../modbus/modbus_controller.dart';
+import '../modbus/modbus_models.dart';
+import '../modbus/ui/modbus_screen.dart';
 import 'settings_sheet.dart';
 
 class Tool {
@@ -47,6 +50,18 @@ final tools = <Tool>[
     status: (ref) {
       final count = ref.watch(catalogProvider).count;
       return count == 0 ? null : '$count';
+    },
+  ),
+  Tool(
+    title: 'Modbus Poll',
+    subtitle: 'Read and write Modbus TCP / RTU devices, share live to the cloud',
+    icon: CupertinoIcons.waveform_path_ecg,
+    color: CupertinoColors.systemOrange,
+    builder: (_) => const ModbusScreen(),
+    status: (ref) => switch (ref.watch(modbusProvider.select((s) => (s.link, s.polls.length)))) {
+      (LinkState.connected, final n) => '● $n',
+      (_, 0) => null,
+      (_, final n) => '$n',
     },
   ),
 ];

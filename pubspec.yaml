@@ -47,6 +47,8 @@ dependencies:
   device_info_plus: ^13.3.0
   android_id: ^0.6.0
   crypto: ^3.0.7
+  flutter_libserialport: ^0.6.0
+  usb_serial: ^0.5.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
