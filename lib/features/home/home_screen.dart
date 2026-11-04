@@ -9,6 +9,7 @@ import '../../widgets/icon_tile.dart';
 import '../components/components_providers.dart';
 import '../components/component_lists_ui.dart';
 import '../components/components_screen.dart';
+import '../ipa/ipa_screen.dart';
 import '../modbus/modbus_controller.dart';
 import '../modbus/modbus_models.dart';
 import '../modbus/ui/modbus_screen.dart';
@@ -63,6 +64,13 @@ final tools = <Tool>[
       (_, 0) => null,
       (_, final n) => '$n',
     },
+  ),
+  Tool(
+    title: 'IPA Export',
+    subtitle: 'Turn a Flutter iOS build (Runner.app) into an .ipa file',
+    icon: CupertinoIcons.archivebox_fill,
+    color: CupertinoColors.systemPurple,
+    builder: (_) => const IpaScreen(),
   ),
 ];
 
