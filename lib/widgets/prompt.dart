@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 
 /// An alert with a text field (e.g. "Rename List"). Completes with the
 /// entered text, or null if cancelled.

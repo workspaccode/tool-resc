@@ -61,25 +61,46 @@ abstract final class ModbusPdu {
   static Uint8List read(int fc, int address, int quantity) {
     _check16(address, 'address');
     if (quantity < 1 || quantity > (Fc.isBitRead(fc) ? 2000 : 125)) {
-      throw ArgumentError('Quantity must be 1–${Fc.isBitRead(fc) ? 2000 : 125}');
+      throw ArgumentError(
+        'Quantity must be 1–${Fc.isBitRead(fc) ? 2000 : 125}',
+      );
     }
-    return Uint8List.fromList([fc, address >> 8, address & 0xFF, quantity >> 8, quantity & 0xFF]);
+    return Uint8List.fromList([
+      fc,
+      address >> 8,
+      address & 0xFF,
+      quantity >> 8,
+      quantity & 0xFF,
+    ]);
   }
 
   static Uint8List writeSingleCoil(int address, bool on) {
     _check16(address, 'address');
-    return Uint8List.fromList([Fc.writeSingleCoil, address >> 8, address & 0xFF, on ? 0xFF : 0x00, 0x00]);
+    return Uint8List.fromList([
+      Fc.writeSingleCoil,
+      address >> 8,
+      address & 0xFF,
+      on ? 0xFF : 0x00,
+      0x00,
+    ]);
   }
 
   static Uint8List writeSingleRegister(int address, int value) {
     _check16(address, 'address');
     final v = value & 0xFFFF;
-    return Uint8List.fromList([Fc.writeSingleRegister, address >> 8, address & 0xFF, v >> 8, v & 0xFF]);
+    return Uint8List.fromList([
+      Fc.writeSingleRegister,
+      address >> 8,
+      address & 0xFF,
+      v >> 8,
+      v & 0xFF,
+    ]);
   }
 
   static Uint8List writeMultipleCoils(int address, List<bool> values) {
     _check16(address, 'address');
-    if (values.isEmpty || values.length > 1968) throw ArgumentError('1–1968 coils');
+    if (values.isEmpty || values.length > 1968)
+      throw ArgumentError('1–1968 coils');
     final bytes = Uint8List((values.length + 7) ~/ 8);
     for (var i = 0; i < values.length; i++) {
       if (values[i]) bytes[i ~/ 8] |= 1 << (i % 8);
@@ -98,7 +119,8 @@ abstract final class ModbusPdu {
 
   static Uint8List writeMultipleRegisters(int address, List<int> values) {
     _check16(address, 'address');
-    if (values.isEmpty || values.length > 123) throw ArgumentError('1–123 registers');
+    if (values.isEmpty || values.length > 123)
+      throw ArgumentError('1–123 registers');
     final n = values.length;
     return Uint8List.fromList([
       Fc.writeMultipleRegisters,
@@ -114,22 +136,30 @@ abstract final class ModbusPdu {
   /// Throws [ModbusException] for an exception response.
   static void checkException(Uint8List pdu) {
     if (pdu.isEmpty) throw const FormatException('Empty response');
-    if (pdu[0] & 0x80 != 0) throw ModbusException(pdu[0] & 0x7F, pdu.length > 1 ? pdu[1] : 0);
+    if (pdu[0] & 0x80 != 0)
+      throw ModbusException(pdu[0] & 0x7F, pdu.length > 1 ? pdu[1] : 0);
   }
 
   /// Values of a read response: 16-bit registers, or 0/1 for coils and
   /// discrete inputs (only the [quantity] requested).
   static List<int> readValues(Uint8List pdu, int fc, int quantity) {
     checkException(pdu);
-    if (pdu[0] != fc) throw FormatException('Response is for function ${pdu[0]}, not $fc');
+    if (pdu[0] != fc)
+      throw FormatException('Response is for function ${pdu[0]}, not $fc');
     if (pdu.length < 2) throw const FormatException('Short response');
     final count = pdu[1];
-    if (pdu.length < 2 + count) throw const FormatException('Response shorter than its byte count');
+    if (pdu.length < 2 + count)
+      throw const FormatException('Response shorter than its byte count');
     final data = pdu.sublist(2, 2 + count);
     if (Fc.isBitRead(fc)) {
-      return [for (var i = 0; i < quantity && i ~/ 8 < data.length; i++) (data[i ~/ 8] >> (i % 8)) & 1];
+      return [
+        for (var i = 0; i < quantity && i ~/ 8 < data.length; i++)
+          (data[i ~/ 8] >> (i % 8)) & 1,
+      ];
     }
-    return [for (var i = 0; i + 1 < data.length; i += 2) (data[i] << 8) | data[i + 1]];
+    return [
+      for (var i = 0; i + 1 < data.length; i += 2) (data[i] << 8) | data[i + 1],
+    ];
   }
 
   /// Bytes of an RTU response for this request, when it can be known from
@@ -182,7 +212,9 @@ Uint8List rtuFrame(int unitId, Uint8List pdu) {
 /// Checks an RTU response frame and returns its PDU.
 Uint8List rtuPdu(Uint8List frame, int unitId) {
   if (frame.length < 5) {
-    throw FormatException('No/short response (${frame.length} bytes). Check Unit ID, baud rate and parity.');
+    throw FormatException(
+      'No/short response (${frame.length} bytes). Check Unit ID, baud rate and parity.',
+    );
   }
   final rx = frame[frame.length - 2] | (frame[frame.length - 1] << 8);
   final calc = crc16(frame, 0, frame.length - 2);
@@ -191,18 +223,78 @@ Uint8List rtuPdu(Uint8List frame, int unitId) {
       'CRC mismatch: got 0x${rx.toRadixString(16).padLeft(4, '0')}, expected 0x${calc.toRadixString(16).padLeft(4, '0')}',
     );
   }
-  if (frame[0] != unitId) throw FormatException('Answer from unit ${frame[0]}, expected $unitId');
+  if (frame[0] != unitId)
+    throw FormatException('Answer from unit ${frame[0]}, expected $unitId');
   return Uint8List.sublistView(frame, 1, frame.length - 2);
+}
+
+/// Finds a complete, CRC-valid RTU frame for [unitId] and request function
+/// [fc] anywhere in [buffer].
+///
+/// The inverter may stream unrelated frames, and a read chunk can start in
+/// the middle of a frame. Scanning every offset avoids both problems.
+Uint8List? findMatchingRtuFrame(Uint8List buffer, int unitId, int fc) {
+  for (var i = 0; i + 5 <= buffer.length; i++) {
+    final frameFc = buffer[i + 1];
+    final int frameLength;
+    if ((frameFc & 0x80) != 0) {
+      frameLength = 5; // unit, fc|0x80, exception code, crc(2)
+    } else if (frameFc == Fc.readCoils ||
+        frameFc == Fc.readDiscreteInputs ||
+        frameFc == Fc.readHoldingRegisters ||
+        frameFc == Fc.readInputRegisters) {
+      if (i + 3 > buffer.length) {
+        continue;
+      }
+      frameLength = 3 + buffer[i + 2] + 2;
+    } else if (frameFc == Fc.writeSingleCoil ||
+        frameFc == Fc.writeSingleRegister ||
+        frameFc == Fc.writeMultipleCoils ||
+        frameFc == Fc.writeMultipleRegisters) {
+      frameLength = 8;
+    } else {
+      continue;
+    }
+    if (frameLength < 5 ||
+        frameLength > 260 ||
+        i + frameLength > buffer.length) {
+      continue;
+    }
+
+    final candidate = Uint8List.sublistView(buffer, i, i + frameLength);
+    final rx = candidate[frameLength - 2] | (candidate[frameLength - 1] << 8);
+    final calc = crc16(candidate, 0, frameLength - 2);
+    if (rx != calc) {
+      continue;
+    }
+
+    if (candidate[0] == unitId &&
+        (candidate[1] == fc || (candidate[1] & 0x7F) == fc)) {
+      return Uint8List.fromList(candidate);
+    }
+  }
+  return null;
 }
 
 /// Modbus TCP frame: MBAP header (transaction, protocol 0, length, unit) + PDU.
 Uint8List tcpFrame(int transactionId, int unitId, Uint8List pdu) {
   final len = pdu.length + 1;
-  return Uint8List.fromList([transactionId >> 8, transactionId & 0xFF, 0, 0, len >> 8, len & 0xFF, unitId, ...pdu]);
+  return Uint8List.fromList([
+    transactionId >> 8,
+    transactionId & 0xFF,
+    0,
+    0,
+    len >> 8,
+    len & 0xFF,
+    unitId,
+    ...pdu,
+  ]);
 }
 
 /// `01 03 00 0A` style.
-String toHex(List<int> bytes) => bytes.map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase()).join(' ');
+String toHex(List<int> bytes) => bytes
+    .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
+    .join(' ');
 
 /// Parses `01 03 0x0A,FF` into bytes. Throws [FormatException] on bad input.
 Uint8List parseHexBytes(String text) {
@@ -210,8 +302,12 @@ Uint8List parseHexBytes(String text) {
   return Uint8List.fromList([
     for (final p in parts)
       () {
-        final v = int.tryParse(p.replaceFirst(RegExp('^0x', caseSensitive: false), ''), radix: 16);
-        if (v == null || v < 0 || v > 0xFF) throw FormatException('“$p” is not a byte');
+        final v = int.tryParse(
+          p.replaceFirst(RegExp('^0x', caseSensitive: false), ''),
+          radix: 16,
+        );
+        if (v == null || v < 0 || v > 0xFF)
+          throw FormatException('“$p” is not a byte');
         return v;
       }(),
   ]);

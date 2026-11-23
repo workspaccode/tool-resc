@@ -41,7 +41,10 @@ class FakeDevice {
         return Uint8List.fromList([
           fc,
           n * 2,
-          for (var i = 0; i < n; i++) ...[registers[a + i] >> 8, registers[a + i] & 0xFF],
+          for (var i = 0; i < n; i++) ...[
+            registers[a + i] >> 8,
+            registers[a + i] & 0xFF,
+          ],
         ]);
       case 5:
         coils[u16(1)] = pdu[3] == 0xFF ? 1 : 0;
@@ -129,16 +132,21 @@ Future<(HttpServer, List<Map>)> serveCloud() async {
     ws.listen((raw) {
       final m = jsonDecode(raw as String) as Map;
       got.add(m);
-      if (m['type'] == 'hello') ws.add(jsonEncode({'type': 'ack', 'message': 'Gateway registered'}));
+      if (m['type'] == 'hello')
+        ws.add(jsonEncode({'type': 'ack', 'message': 'Gateway registered'}));
     });
   });
   return (server, got);
 }
 
-Future<void> waitFor(bool Function() ok, {Duration timeout = const Duration(seconds: 5)}) async {
+Future<void> waitFor(
+  bool Function() ok, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
   final end = DateTime.now().add(timeout);
   while (!ok()) {
-    if (DateTime.now().isAfter(end)) throw TimeoutException('condition not met');
+    if (DateTime.now().isAfter(end))
+      throw TimeoutException('condition not met');
     await Future<void>.delayed(const Duration(milliseconds: 10));
   }
 }
@@ -153,24 +161,81 @@ void main() {
       expect(() => rtuPdu(frame, 1), throwsFormatException);
     });
 
+    test(
+      'finds the response frame after unrelated traffic and misalignment',
+      () {
+        final good = rtuFrame(1, Uint8List.fromList([3, 2, 0x07, 0xEB]));
+        final noise = Uint8List.fromList([
+          0x00,
+          0x02,
+          0xF4,
+          0xA0,
+          0x01,
+          0x04,
+          0x13,
+          0x98,
+        ]);
+        final buffer = Uint8List.fromList([...noise, ...good]);
+        final found = findMatchingRtuFrame(buffer, 1, 3);
+        expect(found, isNotNull);
+        expect(toHex(found!), toHex(good));
+        expect(findMatchingRtuFrame(buffer, 1, 4), isNull);
+      },
+    );
+
     test('read responses: registers, bits, exceptions', () {
-      expect(ModbusPdu.readValues(Uint8List.fromList([3, 4, 0x01, 0x02, 0xFF, 0xFF]), 3, 2), [0x0102, 0xFFFF]);
-      expect(ModbusPdu.readValues(Uint8List.fromList([1, 2, 0x05, 0x01]), 1, 10), [1, 0, 1, 0, 0, 0, 0, 0, 1, 0]);
+      expect(
+        ModbusPdu.readValues(
+          Uint8List.fromList([3, 4, 0x01, 0x02, 0xFF, 0xFF]),
+          3,
+          2,
+        ),
+        [0x0102, 0xFFFF],
+      );
+      expect(
+        ModbusPdu.readValues(Uint8List.fromList([1, 2, 0x05, 0x01]), 1, 10),
+        [1, 0, 1, 0, 0, 0, 0, 0, 1, 0],
+      );
       expect(
         () => ModbusPdu.readValues(Uint8List.fromList([0x83, 2]), 3, 1),
-        throwsA(isA<ModbusException>().having((e) => e.name, 'name', 'Illegal Data Address')),
+        throwsA(
+          isA<ModbusException>().having(
+            (e) => e.name,
+            'name',
+            'Illegal Data Address',
+          ),
+        ),
       );
       expect(ModbusPdu.expectedRtuLength(ModbusPdu.read(3, 0, 10)), 25);
-      expect(ModbusPdu.expectedRtuLength(ModbusPdu.writeSingleRegister(1, 2)), 8);
+      expect(
+        ModbusPdu.expectedRtuLength(ModbusPdu.writeSingleRegister(1, 2)),
+        8,
+      );
     });
 
     test('write PDUs', () {
       expect(toHex(ModbusPdu.writeSingleCoil(0x13, true)), '05 00 13 FF 00');
       expect(
-        toHex(ModbusPdu.writeMultipleCoils(0x13, [true, false, true, true, false, false, true, true, true, false])),
+        toHex(
+          ModbusPdu.writeMultipleCoils(0x13, [
+            true,
+            false,
+            true,
+            true,
+            false,
+            false,
+            true,
+            true,
+            true,
+            false,
+          ]),
+        ),
         '0F 00 13 00 0A 02 CD 01',
       );
-      expect(toHex(ModbusPdu.writeMultipleRegisters(1, [0x000A, 0x0102])), '10 00 01 00 02 04 00 0A 01 02');
+      expect(
+        toHex(ModbusPdu.writeMultipleRegisters(1, [0x000A, 0x0102])),
+        '10 00 01 00 02 04 00 0A 01 02',
+      );
       expect(parseHexBytes('00 0A,0x1f'), [0, 10, 31]);
       expect(parseInt('0x1F'), 31);
       expect(parseInt('-5'), -5);
@@ -183,7 +248,10 @@ void main() {
       expect(formatValue(v, 0, ValueFormat.hex), '0x4120');
       expect(formatValue(v, 0, ValueFormat.binary), '0100 0001 0010 0000');
       expect(formatValue(v, 0, ValueFormat.float32), '10.0000');
-      expect(formatValue([0x0000, 0x4120], 0, ValueFormat.float32Swapped), '10.0000');
+      expect(
+        formatValue([0x0000, 0x4120], 0, ValueFormat.float32Swapped),
+        '10.0000',
+      );
       expect(formatValue([0xFFFF, 0xFFFE], 0, ValueFormat.int32), '-2');
       expect(formatValue([0x0001, 0x0000], 0, ValueFormat.int32Swapped), '1');
       expect(formatValue(v, 2, ValueFormat.float32), '-');
@@ -201,7 +269,10 @@ REGISTER_DEFINITIONS = {
       expect(presets, hasLength(1));
       expect(presets.single.address, 13022);
       expect(presets.single.func, Fc.readInputRegisters);
-      expect(builtInPresets.where((p) => p.key == 'real_time_power').single.address, 5030);
+      expect(
+        builtInPresets.where((p) => p.key == 'real_time_power').single.address,
+        5030,
+      );
     });
   });
 
@@ -217,14 +288,29 @@ REGISTER_DEFINITIONS = {
       addTearDown(t.close);
 
       final results = await Future.wait([
-        for (var i = 0; i < 5; i++) t.request(1, ModbusPdu.read(3, 100, 1), timeout: const Duration(seconds: 2)),
+        for (var i = 0; i < 5; i++)
+          t.request(
+            1,
+            ModbusPdu.read(3, 100, 1),
+            timeout: const Duration(seconds: 2),
+          ),
       ]);
       for (final r in results) {
         expect(ModbusPdu.readValues(r, 3, 1), [1234]);
       }
-      expect(frames.first, startsWith('TX 00 01 00 00 00 06 01 03 00 64 00 01'));
-      final exc = await t.request(1, ModbusPdu.read(3, 9999, 5), timeout: const Duration(seconds: 2));
-      expect(() => ModbusPdu.checkException(exc), throwsA(isA<ModbusException>()));
+      expect(
+        frames.first,
+        startsWith('TX 00 01 00 00 00 06 01 03 00 64 00 01'),
+      );
+      final exc = await t.request(
+        1,
+        ModbusPdu.read(3, 9999, 5),
+        timeout: const Duration(seconds: 2),
+      );
+      expect(
+        () => ModbusPdu.checkException(exc),
+        throwsA(isA<ModbusException>()),
+      );
     });
 
     test('TCP: timeout when nobody answers', () async {
@@ -235,7 +321,11 @@ REGISTER_DEFINITIONS = {
       await t.open();
       addTearDown(t.close);
       expect(
-        () => t.request(1, ModbusPdu.read(3, 0, 1), timeout: const Duration(milliseconds: 100)),
+        () => t.request(
+          1,
+          ModbusPdu.read(3, 0, 1),
+          timeout: const Duration(milliseconds: 100),
+        ),
         throwsA(isA<ModbusTimeout>()),
       );
     });
@@ -245,22 +335,46 @@ REGISTER_DEFINITIONS = {
       final t = RtuTransport(FakeSerial(device, unit: 1));
       await t.open();
       addTearDown(t.close);
-      final r = await t.request(1, ModbusPdu.read(4, 5030, 1), timeout: const Duration(seconds: 1));
+      final r = await t.request(
+        1,
+        ModbusPdu.read(4, 5030, 1),
+        timeout: const Duration(seconds: 1),
+      );
       expect(ModbusPdu.readValues(r, 4, 1), [24513]);
-      await t.request(1, ModbusPdu.writeSingleRegister(7, 99), timeout: const Duration(seconds: 1));
+      await t.request(
+        1,
+        ModbusPdu.writeSingleRegister(7, 99),
+        timeout: const Duration(seconds: 1),
+      );
       expect(device.registers[7], 99);
       expect(
-        () => t.request(2, ModbusPdu.read(3, 0, 1), timeout: const Duration(milliseconds: 150)),
+        () => t.request(
+          2,
+          ModbusPdu.read(3, 0, 1),
+          timeout: const Duration(milliseconds: 150),
+        ),
         throwsA(isA<ModbusTimeout>()),
       );
     });
   });
 
   test('cloud URLs resolve to /ingest and /data', () {
-    expect(const CloudConfig(url: 'ws://host:8790').ingestUri.toString(), 'ws://host:8790/ingest');
-    expect(const CloudConfig(url: 'ws://host:8790/ingest/').ingestUri.toString(), 'ws://host:8790/ingest');
-    expect(const CloudConfig(url: 'https://cloud.example.com').ingestUri.toString(), 'wss://cloud.example.com/ingest');
-    expect(const CloudConfig(url: '10.0.0.2:8790').feedUri.toString(), 'ws://10.0.0.2:8790/data');
+    expect(
+      const CloudConfig(url: 'ws://host:8790').ingestUri.toString(),
+      'ws://host:8790/ingest',
+    );
+    expect(
+      const CloudConfig(url: 'ws://host:8790/ingest/').ingestUri.toString(),
+      'ws://host:8790/ingest',
+    );
+    expect(
+      const CloudConfig(url: 'https://cloud.example.com').ingestUri.toString(),
+      'wss://cloud.example.com/ingest',
+    );
+    expect(
+      const CloudConfig(url: '10.0.0.2:8790').feedUri.toString(),
+      'ws://10.0.0.2:8790/data',
+    );
   });
 
   group('controller', () {
@@ -283,60 +397,81 @@ REGISTER_DEFINITIONS = {
     ModbusController modbus() => app.read(modbusProvider.notifier);
     ModbusState state() => app.read(modbusProvider);
 
-    test('polls a device, writes, and uploads every reading to the cloud', () async {
-      final device = FakeDevice()
-        ..registers[5030] = 24513
-        ..registers[5031] = 7;
-      final tcp = await serveTcp(device);
-      final (cloud, got) = await serveCloud();
-      addTearDown(() async {
-        await tcp.close();
-        await cloud.close(force: true);
-      });
+    test(
+      'polls a device, writes, and uploads every reading to the cloud',
+      () async {
+        final device = FakeDevice()
+          ..registers[5030] = 24513
+          ..registers[5031] = 7;
+        final tcp = await serveTcp(device);
+        final (cloud, got) = await serveCloud();
+        addTearDown(() async {
+          await tcp.close();
+          await cloud.close(force: true);
+        });
 
-      modbus().updateCloud(
-        (c) => c.copyWith(enabled: true, url: 'ws://127.0.0.1:${cloud.port}', site: 'SITE-7', device: 'INV-2'),
-      );
-      await waitFor(() => state().cloudState == CloudState.live && got.isNotEmpty);
-      expect(got.first, containsPair('type', 'hello'));
-      expect(got.first, containsPair('site', 'SITE-7'));
+        modbus().updateCloud(
+          (c) => c.copyWith(
+            enabled: true,
+            url: 'ws://127.0.0.1:${cloud.port}',
+            site: 'SITE-7',
+            device: 'INV-2',
+          ),
+        );
+        await waitFor(
+          () => state().cloudState == CloudState.live && got.isNotEmpty,
+        );
+        expect(got.first, containsPair('type', 'hello'));
+        expect(got.first, containsPair('site', 'SITE-7'));
 
-      modbus().updateConfig((c) => c.copyWith(host: '127.0.0.1', port: tcp.port, unitId: 3));
-      modbus().savePoll(const PollDef(id: 0, name: 'Power', func: 4, address: 5030, quantity: 2, intervalMs: 50));
-      await modbus().connect();
-      expect(state().polling, isTrue, reason: 'polling starts on connect');
+        modbus().updateConfig(
+          (c) => c.copyWith(host: '127.0.0.1', port: tcp.port, unitId: 3),
+        );
+        modbus().savePoll(
+          const PollDef(
+            id: 0,
+            name: 'Power',
+            func: 4,
+            address: 5030,
+            quantity: 2,
+            intervalMs: 50,
+          ),
+        );
+        await modbus().connect();
+        expect(state().polling, isTrue, reason: 'polling starts on connect');
 
-      await waitFor(() => state().polls.single.values.isNotEmpty);
-      expect(state().polls.single.values, [24513, 7]);
-      await waitFor(() => got.any((m) => m['type'] == 'reading'));
-      final reading = got.firstWhere((m) => m['type'] == 'reading');
-      expect(reading['name'], 'Power');
-      expect(reading['func'], 4);
-      expect(reading['addr'], 5030);
-      expect(reading['values'], [24513, 7]);
-      expect(reading['unitId'], '3');
-      expect(reading['device'], 'INV-2');
+        await waitFor(() => state().polls.single.values.isNotEmpty);
+        expect(state().polls.single.values, [24513, 7]);
+        await waitFor(() => got.any((m) => m['type'] == 'reading'));
+        final reading = got.firstWhere((m) => m['type'] == 'reading');
+        expect(reading['name'], 'Power');
+        expect(reading['func'], 4);
+        expect(reading['addr'], 5030);
+        expect(reading['values'], [24513, 7]);
+        expect(reading['unitId'], '3');
+        expect(reading['device'], 'INV-2');
 
-      // The chart follows the first register.
-      await waitFor(() => state().trend.length >= 2);
-      expect(state().trend.last, 24513);
+        // The chart follows the first register.
+        await waitFor(() => state().trend.length >= 2);
+        expect(state().trend.last, 24513);
 
-      // Writes reach the device and the next poll shows them.
-      await modbus().write(Fc.writeMultipleRegisters, 5030, [100, 200]);
-      await waitFor(() => state().polls.single.values.first == 100);
-      expect(device.registers[5031], 200);
-      expect(state().stats.requests, greaterThan(2));
-      expect(modbus().exportCsv(), contains('"Power",4,5030,100,0x0064'));
+        // Writes reach the device and the next poll shows them.
+        await modbus().write(Fc.writeMultipleRegisters, 5030, [100, 200]);
+        await waitFor(() => state().polls.single.values.first == 100);
+        expect(device.registers[5031], 200);
+        expect(state().stats.requests, greaterThan(2));
+        expect(modbus().exportCsv(), contains('"Power",4,5030,100,0x0064'));
 
-      // Settings and polls survive a restart.
-      await modbus().disconnect();
-      expect(state().link, LinkState.disconnected);
-      app.dispose();
-      app = ProviderContainer()..listen(modbusProvider, (_, _) {});
-      expect(state().polls.single.def.address, 5030);
-      expect(state().config.unitId, 3);
-      expect(state().cloud.site, 'SITE-7');
-    });
+        // Settings and polls survive a restart.
+        await modbus().disconnect();
+        expect(state().link, LinkState.disconnected);
+        app.dispose();
+        app = ProviderContainer()..listen(modbusProvider, (_, _) {});
+        expect(state().polls.single.def.address, 5030);
+        expect(state().config.unitId, 3);
+        expect(state().cloud.site, 'SITE-7');
+      },
+    );
 
     test('Cloud Share turned on right at startup stays linked', () async {
       final (cloud, got) = await serveCloud();
@@ -344,7 +479,9 @@ REGISTER_DEFINITIONS = {
       app.dispose();
       app = ProviderContainer()..listen(modbusProvider, (_, _) {});
       // Same tick as the controller's start-up auto-link.
-      modbus().updateCloud((c) => c.copyWith(enabled: true, url: 'ws://127.0.0.1:${cloud.port}'));
+      modbus().updateCloud(
+        (c) => c.copyWith(enabled: true, url: 'ws://127.0.0.1:${cloud.port}'),
+      );
       await waitFor(() => got.isNotEmpty);
       await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(state().cloudState, CloudState.live);
@@ -354,11 +491,18 @@ REGISTER_DEFINITIONS = {
       final device = FakeDevice();
       final tcp = await serveTcp(device);
       addTearDown(tcp.close);
-      modbus().updateConfig((c) => c.copyWith(host: '127.0.0.1', port: tcp.port));
+      modbus().updateConfig(
+        (c) => c.copyWith(host: '127.0.0.1', port: tcp.port),
+      );
       await modbus().connect();
-      final results = await modbus().scan(from: 1, to: 3, fc: 3, address: 0).toList();
+      final results = await modbus()
+          .scan(from: 1, to: 3, fc: 3, address: 0)
+          .toList();
       expect(results.map((r) => r.unit), [1, 2, 3]);
-      expect(results.every((r) => r.found), isTrue); // the fake answers every unit
+      expect(
+        results.every((r) => r.found),
+        isTrue,
+      ); // the fake answers every unit
     });
 
     test('connecting to nothing fails cleanly', () async {

@@ -22,6 +22,7 @@ class RtuTransport extends ModbusTransport {
   final _done = Completer<void>();
   StreamSubscription<Uint8List>? _sub;
   void Function()? _onBytes;
+  DateTime _lastByteAt = DateTime.now();
 
   @override
   String get label => 'RTU ${link.label}';
@@ -35,6 +36,12 @@ class RtuTransport extends ModbusTransport {
     _sub = link.input.listen(
       (data) {
         _rx.add(data);
+        _lastByteAt = DateTime.now();
+        // Keep only enough bytes for the largest possible RTU frame.
+        if (_rx.length > 300) {
+          final all = _rx.takeBytes();
+          _rx.add(Uint8List.sublistView(all, all.length - 300));
+        }
         _onBytes?.call();
       },
       onError: (_) => _drop(),
@@ -43,65 +50,95 @@ class RtuTransport extends ModbusTransport {
   }
 
   @override
-  Future<Uint8List> request(int unitId, Uint8List pdu, {required Duration timeout}) => _queue.run(() async {
+  Future<Uint8List> request(
+    int unitId,
+    Uint8List pdu, {
+    required Duration timeout,
+  }) => _queue.run(() async {
     if (_sub == null) throw StateError('Serial port is not open');
-    _rx.clear(); // drop line noise and late answers to earlier requests
+
+    // The inverter may stream unsolicited frames. Let the line go quiet
+    // before transmitting, then drop whatever arrived earlier.
+    await _waitForIdle();
+    _rx.clear();
+
     final frame = rtuFrame(unitId, pdu);
-    final expected = ModbusPdu.expectedRtuLength(pdu);
     onFrame?.call(true, frame);
     await link.write(frame);
 
     final deadline = DateTime.now().add(timeout);
-    final answer = await _collect(expected, deadline, unitId == 0);
+    final answer = await _collect(unitId, pdu[0], deadline, unitId == 0);
     if (unitId == 0) return pdu; // broadcast: nobody answers; treat as accepted
     if (answer.isEmpty) throw ModbusTimeout(timeout);
     onFrame?.call(false, answer);
     return rtuPdu(answer, unitId);
   });
 
-  /// Waits for a whole response frame. Broadcast (unit 0) has no answer.
-  Future<Uint8List> _collect(int? expected, DateTime deadline, bool broadcast) async {
+  /// Waits until the line has been silent for [silence], up to 500 ms.
+  Future<void> _waitForIdle() async {
+    final end = DateTime.now().add(const Duration(milliseconds: 500));
+    while (DateTime.now().isBefore(end)) {
+      final quietFor = DateTime.now().difference(_lastByteAt);
+      if (quietFor >= silence) return;
+      final remaining = silence - quietFor;
+      await Future<void>.delayed(
+        remaining > const Duration(milliseconds: 10)
+            ? const Duration(milliseconds: 10)
+            : remaining,
+      );
+    }
+  }
+
+  /// Waits for a complete, CRC-valid frame matching the request. Broadcast
+  /// (unit 0) has no answer.
+  Future<Uint8List> _collect(
+    int unitId,
+    int fc,
+    DateTime deadline,
+    bool broadcast,
+  ) async {
     if (broadcast) {
       await Future<void>.delayed(silence * 2);
       return Uint8List(0);
     }
-    Timer? silenceTimer;
+
     Timer? deadlineTimer;
     final done = Completer<void>();
+    Uint8List? found;
+
     void finish() {
       if (!done.isCompleted) done.complete();
     }
 
-    bool complete() {
-      final n = _rx.length;
-      if (n >= 5) {
-        final head = _rx.toBytes();
-        if (head[1] & 0x80 != 0) return true; // exception: unit, fc, code, crc(2)
-      }
-      return expected != null && n >= expected;
+    bool scan() {
+      final frame = findMatchingRtuFrame(_rx.toBytes(), unitId, fc);
+      if (frame == null) return false;
+      found = frame;
+      return true;
     }
 
     _onBytes = () {
-      if (complete()) return finish();
-      silenceTimer?.cancel();
-      silenceTimer = Timer(silence, finish);
+      if (scan()) finish();
     };
+
     final left = deadline.difference(DateTime.now());
     deadlineTimer = Timer(left.isNegative ? Duration.zero : left, finish);
-    if (_rx.length > 0) _onBytes!();
+    if (_rx.length > 0 && scan()) finish();
 
     await done.future;
     _onBytes = null;
-    silenceTimer?.cancel();
     deadlineTimer.cancel();
 
-    var bytes = _rx.takeBytes();
-    if (expected != null && bytes.length > expected && bytes[1] & 0x80 == 0) {
-      bytes = Uint8List.sublistView(bytes, 0, expected);
-    } else if (bytes.length >= 5 && bytes[1] & 0x80 != 0) {
-      bytes = Uint8List.sublistView(bytes, 0, 5);
+    if (found != null) return found!;
+
+    final raw = _rx.takeBytes();
+    if (raw.isNotEmpty) {
+      onFrame?.call(false, raw);
+      throw FormatException(
+        'No matching Modbus response (${raw.length} bytes). Check baud rate, parity and unit ID.',
+      );
     }
-    return Uint8List.fromList(bytes);
+    return raw;
   }
 
   void _drop() {

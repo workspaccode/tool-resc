@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 
 /// iOS Human Interface Guidelines text styles. They inherit the font family
 /// from the Cupertino theme (SF Pro on Apple devices).

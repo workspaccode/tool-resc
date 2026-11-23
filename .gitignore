@@ -47,3 +47,7 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 #tool/screenshots/shots/
+
+# Release bundles
+/dist/
+/android/build/

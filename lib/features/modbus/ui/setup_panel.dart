@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,7 +27,8 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
 
   ModbusController get _modbus => ref.read(modbusProvider.notifier);
 
-  void _set(ModbusConfig Function(ModbusConfig) change) => _modbus.updateConfig(change);
+  void _set(ModbusConfig Function(ModbusConfig) change) =>
+      _modbus.updateConfig(change);
 
   Future<void> _toggleConnection() async {
     final connected = ref.read(modbusProvider).link != LinkState.disconnected;
@@ -108,7 +109,9 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
               padding: const EdgeInsets.all(12),
               child: CupertinoSlidingSegmentedControl<TransportKind>(
                 groupValue: c.kind,
-                onValueChanged: locked ? (_) {} : (k) => _set((c) => c.copyWith(kind: k)),
+                onValueChanged: locked
+                    ? (_) {}
+                    : (k) => _set((c) => c.copyWith(kind: k)),
                 children: {
                   TransportKind.tcp: const Padding(
                     padding: EdgeInsets.symmetric(vertical: 6),
@@ -116,7 +119,9 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
                   ),
                   TransportKind.rtu: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Text(SerialLink.isSupported ? 'Serial RTU' : 'RTU (n/a)'),
+                    child: Text(
+                      SerialLink.isSupported ? 'Serial RTU' : 'RTU (n/a)',
+                    ),
                   ),
                 },
               ),
@@ -134,18 +139,23 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
                 value: '${c.port}',
                 numeric: true,
                 enabled: !locked,
-                onChanged: (v) => _set((c) => c.copyWith(port: int.tryParse(v) ?? 502)),
+                onChanged: (v) =>
+                    _set((c) => c.copyWith(port: int.tryParse(v) ?? 502)),
               ),
               TextRow(
                 label: 'Timeout (ms)',
                 value: '${c.tcpTimeoutMs}',
                 numeric: true,
-                onChanged: (v) => _set((c) => c.copyWith(tcpTimeoutMs: int.tryParse(v) ?? 3000)),
+                onChanged: (v) => _set(
+                  (c) => c.copyWith(tcpTimeoutMs: int.tryParse(v) ?? 3000),
+                ),
               ),
             ] else ...[
               CupertinoListTile(
                 title: const Text('Port'),
-                additionalInfo: Text(c.serialPort.isEmpty ? 'Choose…' : c.serialPort),
+                additionalInfo: Text(
+                  c.serialPort.isEmpty ? 'Choose…' : c.serialPort,
+                ),
                 trailing: const CupertinoListTileChevron(),
                 onTap: locked || !SerialLink.isSupported ? null : _pickPort,
               ),
@@ -155,7 +165,9 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
                 options: _bauds,
                 labelOf: (b) => '$b',
                 enabled: !locked,
-                onChanged: (b) => _set((c) => c.copyWith(serial: _serial(c.serial, baudRate: b))),
+                onChanged: (b) => _set(
+                  (c) => c.copyWith(serial: _serial(c.serial, baudRate: b)),
+                ),
               ),
               PickerRow<int>(
                 label: 'Data Bits',
@@ -163,15 +175,20 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
                 options: const [7, 8],
                 labelOf: (b) => '$b',
                 enabled: !locked,
-                onChanged: (b) => _set((c) => c.copyWith(serial: _serial(c.serial, dataBits: b))),
+                onChanged: (b) => _set(
+                  (c) => c.copyWith(serial: _serial(c.serial, dataBits: b)),
+                ),
               ),
               PickerRow<Parity>(
                 label: 'Parity',
                 value: c.serial.parity,
                 options: Parity.values,
-                labelOf: (p) => '${p.name[0].toUpperCase()}${p.name.substring(1)}',
+                labelOf: (p) =>
+                    '${p.name[0].toUpperCase()}${p.name.substring(1)}',
                 enabled: !locked,
-                onChanged: (p) => _set((c) => c.copyWith(serial: _serial(c.serial, parity: p))),
+                onChanged: (p) => _set(
+                  (c) => c.copyWith(serial: _serial(c.serial, parity: p)),
+                ),
               ),
               PickerRow<int>(
                 label: 'Stop Bits',
@@ -179,27 +196,34 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
                 options: const [1, 2],
                 labelOf: (b) => '$b',
                 enabled: !locked,
-                onChanged: (b) => _set((c) => c.copyWith(serial: _serial(c.serial, stopBits: b))),
+                onChanged: (b) => _set(
+                  (c) => c.copyWith(serial: _serial(c.serial, stopBits: b)),
+                ),
               ),
               TextRow(
                 label: 'Timeout (ms)',
                 value: '${c.rtuTimeoutMs}',
                 numeric: true,
-                onChanged: (v) => _set((c) => c.copyWith(rtuTimeoutMs: int.tryParse(v) ?? 1500)),
+                onChanged: (v) => _set(
+                  (c) => c.copyWith(rtuTimeoutMs: int.tryParse(v) ?? 1500),
+                ),
               ),
             ],
             TextRow(
               label: 'Unit ID',
               value: '${c.unitId}',
               numeric: true,
-              onChanged: (v) => _set((c) => c.copyWith(unitId: (int.tryParse(v) ?? 1).clamp(0, 247))),
+              onChanged: (v) => _set(
+                (c) => c.copyWith(unitId: (int.tryParse(v) ?? 1).clamp(0, 247)),
+              ),
             ),
             TextRow(
               label: 'Address Offset',
               value: '${c.addressOffset}',
               numeric: true,
               signed: true,
-              onChanged: (v) => _set((c) => c.copyWith(addressOffset: int.tryParse(v) ?? 0)),
+              onChanged: (v) =>
+                  _set((c) => c.copyWith(addressOffset: int.tryParse(v) ?? 0)),
             ),
           ],
         ),
@@ -208,20 +232,42 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
             CupertinoListTile(
               leading: IconTile(
                 icon: locked ? CupertinoIcons.xmark : CupertinoIcons.link,
-                color: locked ? CupertinoColors.systemRed : CupertinoColors.systemGreen,
+                color: locked
+                    ? CupertinoColors.systemRed
+                    : CupertinoColors.systemGreen,
               ),
-              title: Text(switch (s.link) {
-                LinkState.connected => 'Disconnect',
-                LinkState.connecting => 'Connecting…',
-                LinkState.disconnected => 'Connect',
-              }, style: TextStyle(color: locked ? red : blue, fontWeight: FontWeight.w600)),
-              additionalInfo: s.connected ? Text(s.linkLabel) : null,
+              title: Text(
+                switch (s.link) {
+                  LinkState.connected => 'Disconnect',
+                  LinkState.connecting => 'Connecting…',
+                  LinkState.disconnected => 'Connect',
+                },
+                style: TextStyle(
+                  color: locked ? red : blue,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              // Subtitle, not additionalInfo: the latter is unconstrained and a long
+              // link label (e.g. "RTU /dev/cu.usbserial-… 9600 8N1") squeezes the
+              // title to zero width and overflows the row.
+              subtitle: s.connected
+                  ? Text(
+                      s.linkLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : null,
               trailing: _busy ? const CupertinoActivityIndicator() : null,
-              onTap: _busy || s.link == LinkState.connecting ? null : _toggleConnection,
+              onTap: _busy || s.link == LinkState.connecting
+                  ? null
+                  : _toggleConnection,
             ),
             if (s.connected)
               CupertinoListTile(
-                leading: const IconTile(icon: CupertinoIcons.checkmark_seal, color: CupertinoColors.systemBlue),
+                leading: const IconTile(
+                  icon: CupertinoIcons.checkmark_seal,
+                  color: CupertinoColors.systemBlue,
+                ),
                 title: Text('Test Connection', style: TextStyle(color: blue)),
                 onTap: _busy ? null : _test,
               ),
@@ -231,13 +277,18 @@ class _ConnectionSectionState extends ConsumerState<ConnectionSection> {
     );
   }
 
-  static SerialSettings _serial(SerialSettings s, {int? baudRate, int? dataBits, Parity? parity, int? stopBits}) =>
-      SerialSettings(
-        baudRate: baudRate ?? s.baudRate,
-        dataBits: dataBits ?? s.dataBits,
-        parity: parity ?? s.parity,
-        stopBits: stopBits ?? s.stopBits,
-      );
+  static SerialSettings _serial(
+    SerialSettings s, {
+    int? baudRate,
+    int? dataBits,
+    Parity? parity,
+    int? stopBits,
+  }) => SerialSettings(
+    baudRate: baudRate ?? s.baudRate,
+    dataBits: dataBits ?? s.dataBits,
+    parity: parity ?? s.parity,
+    stopBits: stopBits ?? s.stopBits,
+  );
 }
 
 /// The poll definitions, with start/stop.
@@ -262,8 +313,12 @@ class PollsSection extends ConsumerWidget {
         for (final p in s.polls)
           CupertinoListTile(
             leading: IconTile(
-              icon: p.def.isBits ? CupertinoIcons.circle_grid_3x3_fill : CupertinoIcons.number_square_fill,
-              color: p.error != null ? CupertinoColors.systemOrange : CupertinoColors.systemIndigo,
+              icon: p.def.isBits
+                  ? CupertinoIcons.circle_grid_3x3_fill
+                  : CupertinoIcons.number_square_fill,
+              color: p.error != null
+                  ? CupertinoColors.systemOrange
+                  : CupertinoColors.systemIndigo,
             ),
             title: Text(p.def.name),
             subtitle: Text(
@@ -276,22 +331,36 @@ class PollsSection extends ConsumerWidget {
               padding: EdgeInsets.zero,
               minimumSize: const Size(32, 32),
               onPressed: () => modbus.removePoll(p.def.id),
-              child: Icon(CupertinoIcons.minus_circle_fill, color: red, size: 22),
+              child: Icon(
+                CupertinoIcons.minus_circle_fill,
+                color: red,
+                size: 22,
+              ),
             ),
             onTap: () => showPollEditor(context, poll: p.def),
           ),
         CupertinoListTile(
-          leading: const IconTile(icon: CupertinoIcons.add, color: CupertinoColors.systemGreen),
+          leading: const IconTile(
+            icon: CupertinoIcons.add,
+            color: CupertinoColors.systemGreen,
+          ),
           title: Text('Add Poll…', style: TextStyle(color: blue)),
           onTap: () => showPollEditor(context),
         ),
         if (s.connected && s.polls.isNotEmpty)
           CupertinoListTile(
             leading: IconTile(
-              icon: s.polling ? CupertinoIcons.pause_fill : CupertinoIcons.play_fill,
-              color: s.polling ? CupertinoColors.systemOrange : CupertinoColors.systemGreen,
+              icon: s.polling
+                  ? CupertinoIcons.pause_fill
+                  : CupertinoIcons.play_fill,
+              color: s.polling
+                  ? CupertinoColors.systemOrange
+                  : CupertinoColors.systemGreen,
             ),
-            title: Text(s.polling ? 'Stop Polling' : 'Start Polling', style: TextStyle(color: blue)),
+            title: Text(
+              s.polling ? 'Stop Polling' : 'Start Polling',
+              style: TextStyle(color: blue),
+            ),
             onTap: s.polling ? modbus.stopPolling : modbus.startPolling,
           ),
       ],
@@ -308,10 +377,14 @@ class CloudSection extends ConsumerWidget {
     final s = ref.watch(modbusProvider);
     final cloud = s.cloud;
     final modbus = ref.read(modbusProvider.notifier);
-    void set(CloudConfig Function(CloudConfig) change) => modbus.updateCloud(change);
+    void set(CloudConfig Function(CloudConfig) change) =>
+        modbus.updateCloud(change);
 
     final (statusText, statusColor) = switch (s.cloudState) {
-      CloudState.live => ('● Live · ${s.cloudSent} sent', CupertinoColors.systemGreen),
+      CloudState.live => (
+        '● Live · ${s.cloudSent} sent',
+        CupertinoColors.systemGreen,
+      ),
       CloudState.connecting => ('○ Connecting…', CupertinoColors.systemOrange),
       CloudState.off => ('○ Off', CupertinoColors.secondaryLabel),
     };
@@ -325,7 +398,10 @@ class CloudSection extends ConsumerWidget {
                 'for all devices watching that site.',
       children: [
         CupertinoListTile(
-          leading: const IconTile(icon: CupertinoIcons.cloud_upload_fill, color: CupertinoColors.systemTeal),
+          leading: const IconTile(
+            icon: CupertinoIcons.cloud_upload_fill,
+            color: CupertinoColors.systemTeal,
+          ),
           title: const Text('Upload Live'),
           trailing: CupertinoSwitch(
             value: cloud.enabled,
@@ -351,7 +427,10 @@ class CloudSection extends ConsumerWidget {
         ),
         CupertinoListTile(
           title: const Text('Status'),
-          additionalInfo: Text(statusText, style: TextStyle(color: context.resolve(statusColor))),
+          additionalInfo: Text(
+            statusText,
+            style: TextStyle(color: context.resolve(statusColor)),
+          ),
         ),
       ],
     );

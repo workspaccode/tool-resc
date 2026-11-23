@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+import 'package:cupertino_ui/cupertino_ui.dart';
 
 /// [CupertinoListTile] that shows a pointer cursor and a hover highlight
 /// when used with a mouse (desktop).

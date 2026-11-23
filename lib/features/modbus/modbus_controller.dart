@@ -340,7 +340,10 @@ class ModbusController extends Notifier<ModbusState> {
       _setError(id, '$e');
       _info('Poll “${def.name}”: $e', error: true);
     } catch (e) {
-      _consecutiveErrors++;
+      // A silent or garbled device isn't a dead port: only count failures of
+      // the link itself, so a wrong unit ID or baud rate never drops the
+      // connection.
+      if (_isLinkFailure(e)) _consecutiveErrors++;
       _setError(id, '$e');
       _info('Poll “${def.name}”: $e', error: true);
     } finally {
@@ -513,6 +516,8 @@ class ModbusController extends Notifier<ModbusState> {
       rethrow;
     }
   }
+
+  static bool _isLinkFailure(Object e) => e is! ModbusTimeout && e is! FormatException && e is! ArgumentError;
 
   void _info(String text, {bool error = false}) {
     if (ref.mounted) _log.add(error ? LogKind.error : LogKind.info, text);
